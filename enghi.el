@@ -51,8 +51,9 @@
 
 ;; 表示関数は差し替え可能にする(DESIGN.md 8-26)。
 ;; **既定は `browse-url'(外部ブラウザ)。**
-;; `xwidget-webkit-browse-url' も選べる。編集はネイティブな Emacs バッファで行うため、
-;; xwidget の既知の弱点(編集可能テキストエリア、キー入力の取り合い)は踏まない。
+;; Emacs 内で開くなら `enghi-browse-in-xwidget' (余白付き)か
+;; `xwidget-webkit-browse-url' (バッファいっぱい)。編集はネイティブな Emacs バッファで
+;; 行うため、xwidget の既知の弱点(編集可能テキストエリア、キー入力の取り合い)は踏まない。
 (defvar enghi-browse-function #'browse-url
   "enghi の画面をブラウザで開く関数.")
 
@@ -194,6 +195,88 @@ KIND は \"page\" などで絞り込む。LIMIT の既定はサーバ側の 50."
 (defun enghi-status ()
   "サーバの状態を返す(接続確認用)."
   (enghi-request "GET" "/api/status"))
+
+
+;;;; ---------------------------------------------------------------- xwidget
+
+;; xwidget のビューはウィンドウ本体を埋め尽くすので、既定ではページの縁が
+;; フリンジやモードラインに貼り付く。四方を少し削って余白を作る。
+;; ビューの大きさは `window-inside-pixel-edges' (マージンとフリンジを除いた領域)
+;; から決まるので、左右はウィンドウのマージン、上はヘッダ行で削れる。
+;; 下だけは高さを返す関数に手を入れるしかない。
+
+(defcustom enghi-xwidget-padding '(24 . 12)
+  "`enghi-browse-in-xwidget' がビューの周りに空ける余白(ピクセル).
+整数なら四方に同じだけ、(横 . 縦) なら左右と上下を別々に指定する。
+左右は文字幅に丸められるので、指定どおりの値にはならない。
+0 にするとバッファいっぱいに広げる."
+  :type '(choice (integer :tag "四方に同じだけ")
+                 (cons :tag "左右と上下で分ける"
+                       (integer :tag "左右") (integer :tag "上下"))))
+
+(defvar-local enghi--xwidget-padded nil
+  "非 nil なら、このバッファのビューに余白を入れる.")
+
+(declare-function xwidget-webkit-browse-url "xwidget" (url &optional new-session))
+(declare-function xwidget-webkit-current-session "xwidget" ())
+(declare-function xwidget-buffer "xwidget" (xwidget))
+(declare-function xwidget-webkit-adjust-size-to-window "xwidget" (xwidget &optional window))
+(declare-function xwidget-webkit-uri "xwidget" (xwidget))
+(declare-function xwidget-at "xwidget" (pos))
+
+(defun enghi--xwidget-padding (axis)
+  "`enghi-xwidget-padding' から AXIS (`horizontal' か `vertical') の余白を取り出す."
+  (let ((pad enghi-xwidget-padding))
+    (cond ((consp pad) (if (eq axis 'horizontal) (car pad) (cdr pad)))
+          ((integerp pad) pad)
+          (t 0))))
+
+(defun enghi--xwidget-shrink-height (height)
+  "余白を入れるバッファでだけ、ビューの高さ HEIGHT を詰める.
+`xwidget-window-inside-pixel-height' の :filter-return として使う。同関数は
+サイズ調整の最中に対象のバッファをカレントにして呼ばれるので、
+`enghi--xwidget-padded' を見れば enghi が開いたバッファだけに効かせられる."
+  (if enghi--xwidget-padded
+      (max 1 (- height (enghi--xwidget-padding 'vertical)))
+    height))
+
+(defun enghi--xwidget-pad (session)
+  "SESSION を表示しているカレントバッファに余白を入れる."
+  (unless (or enghi--xwidget-padded
+              (and (<= (enghi--xwidget-padding 'horizontal) 0)
+                   (<= (enghi--xwidget-padding 'vertical) 0)))
+    (setq enghi--xwidget-padded t)
+    (let ((cols (round (/ (float (enghi--xwidget-padding 'horizontal))
+                          (frame-char-width)))))
+      (setq-local left-margin-width cols
+                  right-margin-width cols))
+    (when (> (enghi--xwidget-padding 'vertical) 0)
+      ;; 上の余白はヘッダ行で作る。線や色が出ると余白に見えないので地に溶かす
+      (setq-local header-line-format " ")
+      (face-remap-add-relative 'header-line '(:inherit default :box nil :underline nil)))
+    (unless (advice-member-p #'enghi--xwidget-shrink-height
+                             'xwidget-window-inside-pixel-height)
+      (advice-add 'xwidget-window-inside-pixel-height :filter-return
+                  #'enghi--xwidget-shrink-height)))
+  (when-let* ((win (get-buffer-window (current-buffer))))
+    ;; マージンをウィンドウに反映してから、ビューを測り直させる
+    (set-window-buffer win (current-buffer))
+    (xwidget-webkit-adjust-size-to-window session win)))
+
+;;;###autoload
+(defun enghi-browse-in-xwidget (url)
+  "URL を xwidget の webkit で開く。ビューの周りに少し余白を残す.
+`enghi-browse-function' に設定して使う:
+
+  (setq enghi-browse-function #\='enghi-browse-in-xwidget)
+
+余白の量は `enghi-xwidget-padding' で変えられる."
+  (require 'xwidget)
+  (xwidget-webkit-browse-url url)
+  (when-let* ((session (xwidget-webkit-current-session))
+              (buf (xwidget-buffer session)))
+    (with-current-buffer buf
+      (enghi--xwidget-pad session))))
 
 ;;;; ---------------------------------------------------------------- focus
 

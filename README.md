@@ -169,8 +169,14 @@ C-c n o
 記事を Emacs 内に表示したい場合は、表示関数を差し替えられます。
 
 ```elisp
-(setq enghi-browse-function #'xwidget-webkit-browse-url)  ; 既定は #'browse-url
+(setq enghi-browse-function #'enghi-browse-in-xwidget)  ; 既定は #'browse-url
 ```
+
+`enghi-browse-in-xwidget` は xwidget の webkit で開き、ビューの周りに少し余白を
+残します（`xwidget-webkit-browse-url` だとページの縁がフリンジやモードラインに
+貼り付きます）。余白は `enghi-xwidget-padding` で変えられます。整数なら四方に同じだけ、
+`(横 . 縦)` なら左右と上下を別々に。`0` にするとバッファいっぱいに広がります。
+余白は enghi が開いたバッファにだけ効きます。
 
 ## 設定
 
@@ -179,6 +185,7 @@ C-c n o
 | `enghi-server-url` | `http://127.0.0.1:7777` | サーバの URL |
 | `enghi-request-timeout` | `10` | リクエストのタイムアウト（秒） |
 | `enghi-browse-function` | `#'browse-url` | ブラウザで開くときの関数 |
+| `enghi-xwidget-padding` | `(24 . 12)` | `enghi-browse-in-xwidget` の余白、`(左右 . 上下)` ピクセル |
 | `enghi-consult-min-input` | `1` | 何文字入力したら検索を始めるか |
 | `enghi-agenda-sections` | inbox / next / waiting / scheduled | agenda に表示する節 |
 
