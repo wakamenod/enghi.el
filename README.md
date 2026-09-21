@@ -1,57 +1,52 @@
 # enghi.el
 
-[enghi](../enghi) — ローカル専用の Wiki + GTD サーバ — を Emacs から使うためのクライアント。
+ローカル専用の Wiki + GTD サーバ [enghi](../enghi) を Emacs から使うためのクライアントです。
 
-検索とインデックスは**サーバ側にある**。Emacs 側はそれを持たない。
-org-roam が遅い原因は SQLite ではなく (1) Elisp での結果変換、(2) 外部 SQLite プロセスとの IPC、
-(3) 保存のたびの全体再クロール、である。enghi はこの3つを Emacs の外に出す構成なので、
-**このパッケージは JSON を受け取って表示するだけに徹する。結果を Elisp で捏ねないこと。**
-
----
+- 記事を Emacs のバッファで開いて編集し、`C-c C-c` で保存
+- 打鍵ごとにサーバを引く横断検索
+- どこからでも1行を GTD の Inbox へ
+- org-agenda 風の一覧からタスクの状態を変更
+- Emacs で選んだものを、開きっぱなしのブラウザに表示させる
 
 ## 必要なもの
 
 | | | |
 |---|---|---|
 | Emacs | 28.1 以上 | |
-| [enghi](../enghi) サーバ | 常駐していること | 別リポジトリ |
-| `markdown-mode` | 任意 | 記事編集バッファで使う。無ければ `fundamental-mode` |
-| `consult` | 任意 | 打鍵ごとの検索。無ければ `completing-read` に落ちる |
+| [enghi](../enghi) サーバ | 常駐していること | |
+| `markdown-mode` | 任意 | 記事バッファで使います |
+| `consult` | 任意 | 打鍵ごとの検索に使います |
 
-認証の設定は無い。サーバが `Host` / `Origin` / `Content-Type` で守っている
-(判断の記録は enghi の `docs/DESIGN.md` 4.4 にある)。トークンを置く項目も無い。
-
----
+`markdown-mode` と `consult` は無くても動きます。それぞれ `fundamental-mode`、
+`completing-read` での検索になります。
 
 ## セットアップ
 
-### 1. サーバを用意する
+### 1. サーバを起動する
 
 ```sh
 cd ../enghi
-make build                      # bin/enghi ができる
-./bin/enghi install-agent -load # launchd に登録して常駐させる
+make build
+./bin/enghi install-agent -load   # launchd で常駐させる
 ```
 
-`install-agent` を使わず手で動かすなら `./bin/enghi serve` でよい。
-既定は `http://127.0.0.1:7777`。ブラウザで開けるか確かめておくこと。
+常駐させずに試すだけなら `./bin/enghi serve` でも構いません。
+既定では `http://127.0.0.1:7777` で動きます。
 
 ```sh
 curl -s http://127.0.0.1:7777/api/status
 # {"db":"...","event_clients":0,"export_dir":"...","ok":true}
 ```
 
-### 2. このパッケージを読み込む
-
-`load-path` に通して `require` するだけ。
+### 2. 読み込む
 
 ```elisp
 (add-to-list 'load-path "~/Projects/SideProjects/enghi.el")
 (require 'enghi)
-(enghi-setup)          ; C-c n にキーマップを置く
+(enghi-setup)          ; C-c n にキーマップを置きます
 ```
 
-`use-package` を使っているなら:
+`use-package` の場合:
 
 ```elisp
 (use-package enghi
@@ -61,143 +56,121 @@ curl -s http://127.0.0.1:7777/api/status
   :custom
   (enghi-server-url "http://127.0.0.1:7777")
   :config
-  ;; 打鍵ごとの検索と agenda は必要になってから読み込む
   (autoload 'enghi-agenda "enghi-agenda" nil t)
   (autoload 'enghi-consult-search "enghi-consult" nil t))
 ```
 
-`straight.el` なら:
+`straight.el` の場合:
 
 ```elisp
 (straight-use-package
  '(enghi :type built-in :local-repo "~/Projects/SideProjects/enghi.el" :files ("*.el")))
 ```
 
-### 3. 繋がっているか確かめる
+### 3. 動作を確かめる
 
-```
-M-x enghi-status
-```
+`M-x enghi-status` でサーバの状態が返ってくれば繋がっています。
+ポートを変えている場合は `enghi-server-url` を合わせてください。
 
-サーバが居なければ「enghi サーバに接続できない」と出る。ポートを変えているなら
-`enghi-server-url` を合わせること。
+### 4. 最初の記事を書く
 
-### 4. 最初の1件を作る
+`C-c n n` でタイトルを入力すると記事バッファが開きます。本文を書いて `C-c C-c` で保存します。
 
-```
-C-c n n     enghi-new-page     タイトルを入れると記事バッファが開く
-C-c C-c     保存
-```
+## 使い方
 
----
-
-## 使う
-
-### キーマップ (`C-c n`)
+### キーマップ（`C-c n`）
 
 | キー | コマンド | |
 |---|---|---|
-| `s` | `enghi-search-command` | 横断検索。consult があれば**打鍵ごとに**サーバを引く |
-| `f` | `enghi-find-page` | 記事を選んでバッファで開く |
-| `n` | `enghi-new-page` | 新しい記事を作って開く |
-| `c` | `enghi-capture` | **どこからでも1行を Inbox へ** |
+| `s` | `enghi-search-command` | 横断検索 |
+| `f` | `enghi-find-page` | 記事を選んで開く |
+| `n` | `enghi-new-page` | 新しい記事を作る |
+| `c` | `enghi-capture` | 1行を Inbox へ |
 | `a` | `enghi-agenda` | GTD の一覧 |
-| `o` | `enghi-focus-page` | **開いているブラウザタブをその記事へ飛ばす** |
+| `o` | `enghi-focus-page` | ブラウザのタブをその記事へ飛ばす |
 | `b` | `enghi-open-in-browser` | ブラウザで開く |
 | `d` | `enghi-browse-dashboard` | ダッシュボードを開く |
 
-### 記事バッファ (`enghi-page-mode`)
+### 記事バッファ
 
-`markdown-mode` の上に重なる。本文は Markdown 原文そのもの。
+`markdown-mode` に `enghi-page-mode` が重なります。本文は Markdown の原文そのものです。
 
 | キー | |
 |---|---|
-| `C-c C-c` | 保存(楽観ロック付き PUT) |
-| `C-c C-r` | 改題。旧タイトルは別名として残り `[[旧タイトル]]` は引き続き解決される |
-| `C-c C-t` | タグを付け替える |
+| `C-c C-c` | 保存 |
+| `C-c C-r` | タイトルを変更 |
+| `C-c C-t` | タグを編集 |
 | `C-c C-l` | 記事を選んで `[[リンク]]` を挿入 |
-| `C-c C-o` | この記事をブラウザで開く |
+| `C-c C-o` | ブラウザで開く |
 | `C-c C-k` | サーバの内容に戻す |
 
-`[[まだ無い記事]]` と書いてよい。未解決リンクとして保持され、その名前の記事を作った時点で
-自動的に解決される。
+`[[まだ無い記事]]` のように、存在しない記事へのリンクも書けます。未解決リンクとして
+保持され、その名前の記事を作った時点で自動的に繋がります。
+
+タイトルを変更すると、旧タイトルは別名として残ります。`[[旧タイトル]]` と書かれた
+他の記事のリンクはそのまま機能します。
 
 ### agenda バッファ
 
 | キー | | キー | |
 |---|---|---|---|
 | `n` | 次の行動 | `d` | 完了 |
-| `w` | 他者待ち(相手を聞く) | `k` | 今回は飛ばす |
-| `s` | 日付を付ける(tickler) | `x` | 破棄 |
-| `l` | 後続の行動 | `f` | **資料にする(記事化)** |
-| `m` | いつか/たぶん | `t` | 題名を変える |
-| `p` | プロジェクトに紐づける | `C` | コンテキストを付ける |
-| `c` | その場で Inbox に追加 | `g` | 更新 |
+| `w` | 他者待ち | `k` | 今回は飛ばす |
+| `s` | 日付を付ける | `x` | 破棄 |
+| `l` | 後続の行動 | `f` | 資料にする（記事化） |
+| `m` | いつか/たぶん | `t` | 題名を変更 |
+| `p` | プロジェクトを設定 | `C` | コンテキストを設定 |
+| `c` | Inbox に追加 | `g` | 更新 |
 | `RET` | ブラウザで開く | `q` | 閉じる |
 
-`f` は GTD の clarify で「行動ではなく参照資料だった」と判断したときに使う。
-Wiki ページが作られ、元の項目は `filed` になる(完了でも破棄でもない)。
+`f` は Inbox の項目が行動ではなく参照資料だった場合に使います。Wiki ページが作られ、
+元の項目は `filed` になります。
 
----
+定期タスクを `d` で完了、または `k` で飛ばすと、次回分が自動で作られます。
 
 ## 保存が競合したとき
 
-**409 は2つの異なる意味を持ち、対応がまったく違う。** 混ぜないこと。
+編集中に他の経路で更新されていた場合は、`ediff` でサーバ側と手元の内容を並べます。
+手元の編集内容はバッファに残ったままなので、見比べてから保存し直せます。
 
-| | 何が起きたか | このパッケージの挙動 |
-|---|---|---|
-| `version_conflict` | 編集中に他の経路(ブラウザなど)で更新された | `ediff` でサーバ側と手元の差分を出す。**手元の入力は捨てない** |
-| `title_conflict` | 新しいタイトルが他の記事の正式名/別名と衝突した | 衝突相手を示して別のタイトルを聞き直す。**本文は保持したまま** |
-
-`version` はタグだけを変えたときにも上がる。そうしないと Emacs 側の楽観ロックが
-タグ変更を見逃して黙って上書きしてしまうため。
-
----
+タイトルを変更しようとして既存の記事と重複した場合は、衝突した相手を表示して別の
+タイトルを尋ねます。本文はそのまま保持されます。
 
 ## ブラウザとの連携
 
-別ディスプレイにブラウザを開きっぱなしにして、Emacs で選んだものを追従させられる。
+別のディスプレイにブラウザを開いたままにしておくと、Emacs で選んだものを追従させられます。
 
 ```
-C-c n o     enghi-focus-page
+C-c n o
 ```
 
-`POST /api/focus` を受けたサーバが、接続している全ブラウザタブに遷移を配信する。
-ブラウザ側は指数バックオフで再接続するので、サーバを再起動しても繋がり直す。
+サーバが接続中の全タブに遷移を配信します。サーバを再起動してもブラウザ側から繋ぎ直します。
 
-表示関数は差し替えられる:
+記事を Emacs 内に表示したい場合は、表示関数を差し替えられます。
 
 ```elisp
-(setq enghi-browse-function #'browse-url)                ; 既定(外部ブラウザ)
-(setq enghi-browse-function #'xwidget-webkit-browse-url) ; Emacs 内に埋め込む
+(setq enghi-browse-function #'xwidget-webkit-browse-url)  ; 既定は #'browse-url
 ```
 
-xwidget の既知の弱点は「編集可能テキストエリアとの相互作用」と
-「Emacs と WebKit のキー入力の取り合い」だが、**編集はネイティブな Emacs バッファで行うので
-その経路を踏まない。** 閲覧用途なら試す価値がある。
-
----
-
-## 設定できるもの
+## 設定
 
 | 変数 | 既定 | |
 |---|---|---|
-| `enghi-server-url` | `http://127.0.0.1:7777` | ループバック以外はサーバ側の Host 検査で 403 |
-| `enghi-request-timeout` | `10` | 同期リクエストのタイムアウト(秒) |
-| `enghi-browse-function` | `#'browse-url` | 表示関数 |
-| `enghi-consult-min-input` | `1` | この文字数以上でサーバに問い合わせる |
-| `enghi-agenda-sections` | inbox / next / waiting / scheduled | agenda に出す節 |
+| `enghi-server-url` | `http://127.0.0.1:7777` | サーバの URL |
+| `enghi-request-timeout` | `10` | リクエストのタイムアウト（秒） |
+| `enghi-browse-function` | `#'browse-url` | ブラウザで開くときの関数 |
+| `enghi-consult-min-input` | `1` | 何文字入力したら検索を始めるか |
+| `enghi-agenda-sections` | inbox / next / waiting / scheduled | agenda に表示する節 |
 
----
+パスワードやトークンの設定はありません。サーバはループバックからの接続のみを受け付けます。
 
 ## 開発
 
 ```sh
-make compile    # バイトコンパイルして警告を見る(警告はエラー扱い)
+make compile    # バイトコンパイル（警告はエラー扱い）
 ```
 
-テストは**動いているサーバに対して**実行する。本番の DB を汚さないよう、
-テスト用の設定で別ポートに立てること:
+テストは動いているサーバに対して実行します。別ポートにテスト用のサーバを立ててください。
 
 ```sh
 cat > /tmp/enghi-test.toml <<'TOML'
@@ -210,24 +183,11 @@ TOML
 make test
 ```
 
-検査している内容:
-
-- **日本語が往復すること** — `url` のバッファは unibyte なので `decode-coding-region` では
-  multibyte にならない。ここを間違えると日本語タイトルの記事に一切アクセスできなくなる
-  (実際に踏んだ)
-- **版が競合したときに手元の入力が消えないこと** — 最悪の壊れ方なので必ず検査する
-- `title_conflict` が衝突相手のページを返すこと
-- capture、agenda の状態変更が PATCH にマップされること
-- **consult の候補がサーバの順序と件数をそのまま使うこと** — Elisp 側で並べ替えたり
-  絞り込んだりしていないことの検査
-
----
-
 ## 構成
 
 | ファイル | |
 |---|---|
-| `enghi.el` | API クライアント、記事の編集、capture、focus、キーマップ |
-| `enghi-consult.el` | 打鍵ごとに `/api/search` を叩く consult の非同期ソース |
-| `enghi-agenda.el` | org-agenda 風の GTD 一覧 |
-| `enghi-tests.el` | ert。動いているサーバに対して実行する |
+| `enghi.el` | API クライアント、記事の編集、capture、キーマップ |
+| `enghi-consult.el` | consult を使った検索 |
+| `enghi-agenda.el` | GTD の一覧 |
+| `enghi-tests.el` | テスト |
