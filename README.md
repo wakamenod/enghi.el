@@ -60,6 +60,22 @@ curl -s http://127.0.0.1:7777/api/status
   (autoload 'enghi-consult-search "enghi-consult" nil t))
 ```
 
+`leaf` の場合。`:bind-keymap` は展開時にキーマップを `eval` してしまい未ロードだと
+失敗するので、キーマップの autoload を張ります:
+
+```elisp
+(leaf enghi
+  :load-path "~/Projects/SideProjects/enghi.el"
+  :commands (enghi-find-page enghi-new-page enghi-capture enghi-search-command
+             enghi-open-in-browser enghi-focus-page enghi-browse-dashboard enghi-status)
+  :init
+  (autoload 'enghi-command-map "enghi" nil nil 'keymap)
+  (autoload 'enghi-agenda "enghi-agenda" nil t)
+  (autoload 'enghi-consult-search "enghi-consult" nil t)
+  :bind (("C-c n" . enghi-command-map))
+  :custom ((enghi-server-url . "http://127.0.0.1:7777")))
+```
+
 `straight.el` の場合:
 
 ```elisp
@@ -71,6 +87,10 @@ curl -s http://127.0.0.1:7777/api/status
 
 `M-x enghi-status` でサーバの状態が返ってくれば繋がっています。
 ポートを変えている場合は `enghi-server-url` を合わせてください。
+
+繋がらない状態でブラウザを開こうとした場合は、ブラウザに投げる前に
+Emacs 側でエラーになります（xwidget に投げると WebKit のエラーページが
+表示されるだけで、原因が分からないため）。
 
 ### 4. 最初の記事を書く
 

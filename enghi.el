@@ -22,6 +22,7 @@
 
 (require 'url)
 (require 'url-http)
+(require 'url-util)
 (require 'json)
 (require 'seq)
 (require 'subr-x)
@@ -208,9 +209,31 @@ Emacs で検索・選択 → 別ディスプレイのブラウザが追従する
           (message "%s へ飛ばしたが、接続しているブラウザが無い" path))))
     res))
 
+(defun enghi--browse-url-for (path)
+  "PATH から、ブラウザに渡せる形の URL を作る.
+
+**必ずパーセントエンコードして渡す。**日本語を含む URL を生の文字列のまま
+渡すと、表示関数が何で符号化するかに結果が左右される。
+`browse-url' と `xwidget-webkit-browse-url' では扱いが違う."
+  (url-encode-url (enghi--url path)))
+
+(defun enghi--ensure-server ()
+  "サーバに繋がることを確かめる。繋がらなければ分かるエラーにする.
+
+ブラウザに投げてから落ちていることに気づくと、表示されるのは
+WebKit のエラーページで、原因が読み取れない."
+  (condition-case nil
+      (let ((enghi-request-timeout 3))
+        (enghi-request "GET" "/api/status")
+        t)
+    (error
+     (user-error "enghi サーバに接続できない (%s)。`enghi serve' が動いているか確認すること"
+                 enghi-server-url))))
+
 (defun enghi-browse (path)
   "PATH を `enghi-browse-function' で開く."
-  (funcall enghi-browse-function (enghi--url path)))
+  (enghi--ensure-server)
+  (funcall enghi-browse-function (enghi--browse-url-for path)))
 
 ;;;; ---------------------------------------------------------------- ページの編集
 
@@ -456,6 +479,12 @@ Emacs で検索・選択 → 別ディスプレイのブラウザが追従する
   "enghi のコマンドをまとめたキーマップ.
 設定例:
   (global-set-key (kbd \"C-c n\") enghi-command-map)")
+
+;; シンボルの関数セルにもキーマップを置いておくと、キーマップの autoload
+;;   (autoload 'enghi-command-map "enghi" nil nil 'keymap)
+;; でプレフィックスキーだけ先に張って、押された時に読み込ませられる。
+;;;###autoload (autoload 'enghi-command-map "enghi" nil nil 'keymap)
+(defalias 'enghi-command-map enghi-command-map)
 
 ;;;###autoload
 (defun enghi-search-command ()

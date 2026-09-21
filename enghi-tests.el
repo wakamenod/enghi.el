@@ -169,3 +169,26 @@ Elisp 側で絞り込むと、bm25 の順位と 3 節の設計が無意味にな
     (let ((enghi-consult-min-input 3))
       (should-not (enghi-consult--candidates "あ"))
       (should-not (enghi-consult--candidates "")))))
+
+;;;; ブラウザに渡す URL
+
+(ert-deftest enghi-test-browse-url-is-encoded ()
+  "日本語を含む URL がパーセントエンコードされて渡されること.
+生のまま渡すと、表示関数が何で符号化するかに結果が左右される."
+  (let (captured)
+    (let ((enghi-browse-function (lambda (url) (setq captured url))))
+      (enghi-browse "/wiki/日本語のタイトル"))
+    (should (string-match-p "%E6%97%A5%E6%9C%AC%E8%AA%9E" captured))
+    (should-not (string-match-p "日本語" captured))
+    ;; ASCII だけの場合は素のまま
+    (let ((enghi-browse-function (lambda (url) (setq captured url))))
+      (enghi-browse "/wiki/design-notes"))
+    (should (string-suffix-p "/wiki/design-notes" captured))))
+
+(ert-deftest enghi-test-browse-reports-dead-server ()
+  "サーバが落ちているときは、ブラウザに投げる前に分かるエラーにすること."
+  (let ((enghi-server-url "http://127.0.0.1:1")
+        (opened nil))
+    (let ((enghi-browse-function (lambda (_url) (setq opened t))))
+      (should-error (enghi-browse "/wiki/foo") :type 'error))
+    (should-not opened)))
