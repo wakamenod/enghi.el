@@ -240,6 +240,51 @@ KIND は \"page\" などで絞り込む。LIMIT の既定はサーバ側の 50."
       (max 1 (- height (enghi--xwidget-padding 'vertical)))
     height))
 
+(defvar enghi-xwidget-mode-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "E") #'enghi-xwidget-edit-page)
+    map)
+  "enghi が開いた webkit バッファのキーマップ.
+`e' は xwidget 本来の `xwidget-webkit-edit-mode' (キーをページ側へ渡す)
+なので、そちらは潰さずに大文字を使う.")
+
+(define-minor-mode enghi-xwidget-mode
+  "enghi が開いた webkit バッファであることを表す最小のモード.
+
+\\{enghi-xwidget-mode-map}"
+  :lighter " enghi"
+  :keymap enghi-xwidget-mode-map)
+
+(defun enghi--xwidget-slug ()
+  "この webkit バッファが表示している enghi の記事の slug。無ければ nil."
+  (when (eq major-mode 'xwidget-webkit-mode)
+    (when-let* ((session (xwidget-at (point-min)))
+                (uri (ignore-errors (xwidget-webkit-uri session)))
+                (parsed (url-generic-parse-url uri))
+                (path (car (url-path-and-query parsed))))
+      ;; 同じ画面でも別のサーバを見ていることがあるので、URL の出どころも見る
+      (let ((server (url-generic-parse-url enghi-server-url)))
+        (when (and (equal (url-host parsed) (url-host server))
+                   (equal (url-port parsed) (url-port server))
+                   (string-match "\\`/wiki/\\([^/]+\\)\\'" path))
+          ;; slug は URL 上ではパーセントエンコードされている
+          (decode-coding-string (url-unhex-string (match-string 1 path)) 'utf-8))))))
+
+;;;###autoload
+(defun enghi-xwidget-edit-page ()
+  "表示している記事を、この画面の下に Emacs バッファとして開く.
+
+保存(\\[enghi-save])するとサーバが更新を配信し、上の画面は自分で
+読み込み直す(`web/static/app.js' の updated の扱い)."
+  (interactive)
+  (let ((slug (or (enghi--xwidget-slug)
+                  (user-error "この画面は enghi の記事ではない")))
+        ;; 既に開いているならその窓を使い、無ければこの窓の下に出す
+        (display-buffer-overriding-action
+         '((display-buffer-reuse-window display-buffer-below-selected)
+           (window-height . 0.5))))
+    (enghi-open slug)))
+
 (defun enghi--xwidget-pad (session)
   "SESSION を表示しているカレントバッファに余白を入れる."
   (unless (or enghi--xwidget-padded
@@ -276,6 +321,7 @@ KIND は \"page\" などで絞り込む。LIMIT の既定はサーバ側の 50."
   (when-let* ((session (xwidget-webkit-current-session))
               (buf (xwidget-buffer session)))
     (with-current-buffer buf
+      (enghi-xwidget-mode 1)
       (enghi--xwidget-pad session))))
 
 ;;;; ---------------------------------------------------------------- focus
