@@ -32,7 +32,6 @@
 
 ;; 別ファイルで定義する。循環 require を避けるため宣言だけしておく。
 (declare-function markdown-mode "markdown-mode" ())
-(declare-function enghi-agenda "enghi-agenda" ())
 (declare-function enghi-consult-search "enghi-consult" ())
 
 (defgroup enghi nil
@@ -599,7 +598,6 @@ WebKit のエラーページで、原因が読み取れない."
     (define-key map (kbd "f") #'enghi-find-page)
     (define-key map (kbd "s") #'enghi-search-command)
     (define-key map (kbd "c") #'enghi-capture)
-    (define-key map (kbd "a") #'enghi-agenda)
     (define-key map (kbd "b") #'enghi-open-in-browser)
     (define-key map (kbd "o") #'enghi-focus-page)
     (define-key map (kbd "d") #'enghi-browse-dashboard)
@@ -658,10 +656,9 @@ WebKit のエラーページで、原因が読み取れない."
   (require \='enghi)
   (enghi-setup)"
   (interactive)
-  (autoload 'enghi-agenda "enghi-agenda" nil t)
   (autoload 'enghi-consult-search "enghi-consult" nil t)
   (global-set-key (kbd "C-c n") enghi-command-map)
-  (message "enghi: C-c n で使える (f 記事 / s 検索 / c capture / a agenda)"))
+  (message "enghi: C-c n で使える (f 記事 / s 検索 / c capture / d ダッシュボード)"))
 
 (provide 'enghi)
 ;;; enghi.el ends here

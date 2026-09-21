@@ -5,7 +5,7 @@
 - 記事を Emacs のバッファで開いて編集し、`C-c C-c` で保存
 - 打鍵ごとにサーバを引く横断検索
 - どこからでも1行を GTD の Inbox へ
-- org-agenda 風の一覧からタスクの状態を変更
+- GTD のタスクは Emacs 内の webkit に出したダッシュボードから扱う
 - Emacs で選んだものを、開きっぱなしのブラウザに表示させる
 
 ## 必要なもの
@@ -51,12 +51,11 @@ curl -s http://127.0.0.1:7777/api/status
 ```elisp
 (use-package enghi
   :load-path "~/Projects/SideProjects/enghi.el"
-  :commands (enghi-find-page enghi-capture enghi-agenda enghi-search-command)
+  :commands (enghi-find-page enghi-capture enghi-browse-dashboard enghi-search-command)
   :bind-keymap ("C-c n" . enghi-command-map)
   :custom
   (enghi-server-url "http://127.0.0.1:7777")
   :config
-  (autoload 'enghi-agenda "enghi-agenda" nil t)
   (autoload 'enghi-consult-search "enghi-consult" nil t))
 ```
 
@@ -70,7 +69,6 @@ curl -s http://127.0.0.1:7777/api/status
              enghi-open-in-browser enghi-focus-page enghi-browse-dashboard enghi-status)
   :init
   (autoload 'enghi-command-map "enghi" nil nil 'keymap)
-  (autoload 'enghi-agenda "enghi-agenda" nil t)
   (autoload 'enghi-consult-search "enghi-consult" nil t)
   :bind (("C-c n" . enghi-command-map))
   :custom ((enghi-server-url . "http://127.0.0.1:7777")))
@@ -106,10 +104,9 @@ Emacs 側でエラーになります（xwidget に投げると WebKit のエラ�
 | `f` | `enghi-find-page` | 記事を選んで開く |
 | `n` | `enghi-new-page` | 新しい記事を作る |
 | `c` | `enghi-capture` | 1行を Inbox へ |
-| `a` | `enghi-agenda` | GTD の一覧 |
 | `o` | `enghi-focus-page` | ブラウザのタブをその記事へ飛ばす |
 | `b` | `enghi-open-in-browser` | ブラウザで開く |
-| `d` | `enghi-browse-dashboard` | ダッシュボードを開く |
+| `d` | `enghi-browse-dashboard` | ダッシュボード（GTD もここ）を開く |
 
 ### 記事バッファ
 
@@ -129,24 +126,6 @@ Emacs 側でエラーになります（xwidget に投げると WebKit のエラ�
 
 タイトルを変更すると、旧タイトルは別名として残ります。`[[旧タイトル]]` と書かれた
 他の記事のリンクはそのまま機能します。
-
-### agenda バッファ
-
-| キー | | キー | |
-|---|---|---|---|
-| `n` | 次の行動 | `d` | 完了 |
-| `w` | 他者待ち | `k` | 今回は飛ばす |
-| `s` | 日付を付ける | `x` | 破棄 |
-| `l` | 後続の行動 | `f` | 資料にする（記事化） |
-| `m` | いつか/たぶん | `t` | 題名を変更 |
-| `p` | プロジェクトを設定 | `C` | コンテキストを設定 |
-| `c` | Inbox に追加 | `g` | 更新 |
-| `RET` | ブラウザで開く | `q` | 閉じる |
-
-`f` は Inbox の項目が行動ではなく参照資料だった場合に使います。Wiki ページが作られ、
-元の項目は `filed` になります。
-
-定期タスクを `d` で完了、または `k` で飛ばすと、次回分が自動で作られます。
 
 ## 見ながら書く
 
@@ -204,7 +183,6 @@ C-c n o
 | `enghi-browse-function` | `#'browse-url` | ブラウザで開くときの関数 |
 | `enghi-xwidget-padding` | `(24 . 12)` | `enghi-browse-in-xwidget` の余白、`(左右 . 上下)` ピクセル |
 | `enghi-consult-min-input` | `1` | 何文字入力したら検索を始めるか |
-| `enghi-agenda-sections` | inbox / next / waiting / scheduled | agenda に表示する節 |
 
 パスワードやトークンの設定はありません。サーバはループバックからの接続のみを受け付けます。
 
@@ -233,5 +211,4 @@ make test
 |---|---|
 | `enghi.el` | API クライアント、記事の編集、capture、キーマップ |
 | `enghi-consult.el` | consult を使った検索 |
-| `enghi-agenda.el` | GTD の一覧 |
 | `enghi-tests.el` | テスト |

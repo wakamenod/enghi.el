@@ -9,7 +9,6 @@
 
 (require 'ert)
 (require 'enghi)
-(require 'enghi-agenda)
 
 (setq enghi-server-url (or (getenv "ENGHI_TEST_URL") "http://127.0.0.1:7799"))
 
@@ -106,28 +105,6 @@
   "focus がサーバに受け付けられること(接続クライアントは 0 でよい)."
   (let ((res (enghi-focus "/wiki/test")))
     (should (alist-get 'ok res))))
-
-(ert-deftest enghi-test-agenda-renders ()
-  "agenda バッファが作られ、状態変更が PATCH にマップされること."
-  (let* ((title (enghi-tests--unique "agenda 用"))
-         (task (enghi-capture title)))
-    (enghi-agenda)
-    (unwind-protect
-        (with-current-buffer enghi-agenda-buffer-name
-          (should (string-match-p (regexp-quote title) (buffer-string)))
-          ;; 該当行へ移動して n(next にする)
-          (goto-char (point-min))
-          (should (search-forward title nil t))
-          (beginning-of-line)
-          (enghi-agenda-set-next)
-          (should (equal (alist-get 'state (enghi-request
-                                            "GET" (format "/api/tasks/%s"
-                                                          (alist-get 'id task))))
-                         nil))
-          ;; API はタスクを task キーで返す
-          (let ((got (enghi-request "GET" (format "/api/tasks/%s" (alist-get 'id task)))))
-            (should (equal (alist-get 'state (alist-get 'task got)) "next"))))
-      (kill-buffer enghi-agenda-buffer-name))))
 
 (ert-deftest enghi-test-error-when-server-down ()
   "サーバが居ないときは分かるエラーになること."
