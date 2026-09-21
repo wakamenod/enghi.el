@@ -222,6 +222,7 @@ KIND は \"page\" などで絞り込む。LIMIT の既定はサーバ側の 50."
 (declare-function xwidget-webkit-adjust-size-to-window "xwidget" (xwidget &optional window))
 (declare-function xwidget-webkit-uri "xwidget" (xwidget))
 (declare-function xwidget-at "xwidget" (pos))
+(declare-function xwidget-webkit-pass-command-event "xwidget" ())
 
 (defun enghi--xwidget-padding (axis)
   "`enghi-xwidget-padding' から AXIS (`horizontal' か `vertical') の余白を取り出す."
@@ -242,6 +243,11 @@ KIND は \"page\" などで絞り込む。LIMIT の既定はサーバ側の 50."
 (defvar enghi-xwidget-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "E") #'enghi-xwidget-edit-page)
+    ;; GTD の一覧の操作はページ側の JS が持っている。xwidget は既定では
+    ;; キーを Emacs が食べてしまうので、該当のキーだけページへ素通しする。
+    ;; (`e' の `xwidget-webkit-edit-mode' に入らなくても押せるようにする)
+    (dolist (key '("j" "k" "RET" "n" "w" "s" "l" "m" "d" "S" "f" "t" "x" "c" "/"))
+      (define-key map (kbd key) #'xwidget-webkit-pass-command-event))
     map)
   "enghi が開いた webkit バッファのキーマップ.
 `e' は xwidget 本来の `xwidget-webkit-edit-mode' (キーをページ側へ渡す)
@@ -254,20 +260,66 @@ KIND は \"page\" などで絞り込む。LIMIT の既定はサーバ側の 50."
   :lighter " enghi"
   :keymap enghi-xwidget-mode-map)
 
-(defun enghi--xwidget-slug ()
-  "この webkit バッファが表示している enghi の記事の slug。無ければ nil."
+(defun enghi--xwidget-path ()
+  "この webkit バッファが開いている enghi のパス。別のサーバなら nil.
+
+同じ画面で外のサイトを見ていることがあるので、URL の出どころまで見る."
   (when (eq major-mode 'xwidget-webkit-mode)
     (when-let* ((session (xwidget-at (point-min)))
                 (uri (ignore-errors (xwidget-webkit-uri session)))
                 (parsed (url-generic-parse-url uri))
-                (path (car (url-path-and-query parsed))))
-      ;; 同じ画面でも別のサーバを見ていることがあるので、URL の出どころも見る
-      (let ((server (url-generic-parse-url enghi-server-url)))
-        (when (and (equal (url-host parsed) (url-host server))
-                   (equal (url-port parsed) (url-port server))
-                   (string-match "\\`/wiki/\\([^/]+\\)\\'" path))
-          ;; slug は URL 上ではパーセントエンコードされている
-          (decode-coding-string (url-unhex-string (match-string 1 path)) 'utf-8))))))
+                (path (car (url-path-and-query parsed)))
+                (server (url-generic-parse-url enghi-server-url)))
+      (when (and (equal (url-host parsed) (url-host server))
+                 (equal (url-port parsed) (url-port server)))
+        path))))
+
+(defun enghi--xwidget-slug ()
+  "この webkit バッファが表示している enghi の記事の slug。無ければ nil."
+  (when-let* ((path (enghi--xwidget-path)))
+    (when (string-match "\\`/wiki/\\([^/]+\\)\\'" path)
+      ;; slug は URL 上ではパーセントエンコードされている
+      (decode-coding-string (url-unhex-string (match-string 1 path)) 'utf-8))))
+
+;;;; ヘッダ行 — 何が押せるかを、その画面に合わせて出す
+;;
+;; **キーは覚えていられない前提で作る。**GTD の状態変更はページ側の JS が
+;; 受けるので(`enghi-xwidget-mode-map' が転送する)、画面ごとに出し分ける。
+
+(defconst enghi--xwidget-keys-gtd
+  '(("j/k" . "移動") ("RET" . "開く") ("n" . "次の行動") ("w" . "待ち")
+    ("s" . "日付") ("l" . "後続") ("m" . "いつか") ("d" . "完了")
+    ("S" . "飛ばす") ("f" . "資料") ("t" . "題名") ("x" . "破棄") ("c" . "追加"))
+  "GTD の一覧で押せるキー.")
+
+(defconst enghi--xwidget-keys-page
+  '(("E" . "編集") ("b/f" . "戻る/進む") ("r" . "再読込") ("+/-" . "拡大縮小")
+    ("e" . "キーをページへ"))
+  "記事を表示しているときに押せるキー.")
+
+(defconst enghi--xwidget-keys-other
+  '(("j/k" . "移動") ("RET" . "開く") ("/" . "検索") ("c" . "追加")
+    ("b/f" . "戻る/進む") ("r" . "再読込"))
+  "その他の画面で押せるキー.")
+
+(defun enghi--xwidget-keys-string (keys)
+  "KEYS (キー . 説明) の並びを、ヘッダ行に出す1行にする."
+  (mapconcat (lambda (cell)
+               (concat (propertize (car cell) 'face 'help-key-binding)
+                       " " (propertize (cdr cell) 'face 'shadow)))
+             keys
+             (propertize "  " 'face 'shadow)))
+
+(defun enghi--xwidget-header ()
+  "ヘッダ行の中身。`header-line-format' から :eval で呼ばれる."
+  (let ((path (enghi--xwidget-path)))
+    (concat " "
+            (cond ((null path) "")
+                  ((string-prefix-p "/gtd" path)
+                   (enghi--xwidget-keys-string enghi--xwidget-keys-gtd))
+                  ((string-prefix-p "/wiki/" path)
+                   (enghi--xwidget-keys-string enghi--xwidget-keys-page))
+                  (t (enghi--xwidget-keys-string enghi--xwidget-keys-other))))))
 
 ;;;###autoload
 (defun enghi-xwidget-edit-page ()
@@ -294,10 +346,10 @@ KIND は \"page\" などで絞り込む。LIMIT の既定はサーバ側の 50."
                           (frame-char-width)))))
       (setq-local left-margin-width cols
                   right-margin-width cols))
-    (when (> (enghi--xwidget-padding 'vertical) 0)
-      ;; 上の余白はヘッダ行で作る。線や色が出ると余白に見えないので地に溶かす
-      (setq-local header-line-format " ")
-      (face-remap-add-relative 'header-line '(:inherit default :box nil :underline nil)))
+    ;; 上の余白はヘッダ行で作る。ここに押せるキーを出しておく(覚えていなくても
+    ;; 使えるように)。線や色が出ると余白に見えないので、地の色に溶かす。
+    (setq-local header-line-format '(:eval (enghi--xwidget-header)))
+    (face-remap-add-relative 'header-line '(:inherit default :box nil :underline nil))
     (unless (advice-member-p #'enghi--xwidget-shrink-height
                              'xwidget-window-inside-pixel-height)
       (advice-add 'xwidget-window-inside-pixel-height :filter-return
