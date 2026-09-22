@@ -287,19 +287,19 @@ KIND は \"page\" などで絞り込む。LIMIT の既定はサーバ側の 50."
 ;; 受けるので(`enghi-xwidget-mode-map' が転送する)、画面ごとに出し分ける。
 
 (defconst enghi--xwidget-keys-gtd
-  '(("j/k" . "移動") ("RET" . "開く") ("n" . "次の行動") ("w" . "待ち")
-    ("s" . "日付") ("l" . "後続") ("m" . "いつか") ("d" . "完了")
-    ("S" . "飛ばす") ("f" . "資料") ("t" . "題名") ("x" . "破棄") ("c" . "追加"))
+  '(("j/k" . "Move") ("RET" . "Open") ("n" . "Next") ("w" . "Waiting")
+    ("s" . "Scheduled") ("l" . "Later") ("m" . "Someday") ("d" . "Done")
+    ("S" . "Skip") ("f" . "File") ("t" . "Rename") ("x" . "Drop") ("c" . "Capture"))
   "GTD の一覧で押せるキー.")
 
 (defconst enghi--xwidget-keys-page
-  '(("E" . "編集") ("b/f" . "戻る/進む") ("r" . "再読込") ("+/-" . "拡大縮小")
-    ("e" . "キーをページへ"))
+  '(("E" . "Edit") ("b/f" . "Back/Fwd") ("r" . "Reload") ("+/-" . "Zoom")
+    ("e" . "Keys to page"))
   "記事を表示しているときに押せるキー.")
 
 (defconst enghi--xwidget-keys-other
-  '(("j/k" . "移動") ("RET" . "開く") ("/" . "検索") ("c" . "追加")
-    ("b/f" . "戻る/進む") ("r" . "再読込"))
+  '(("j/k" . "Move") ("RET" . "Open") ("/" . "Search") ("c" . "Capture")
+    ("b/f" . "Back/Fwd") ("r" . "Reload"))
   "その他の画面で押せるキー.")
 
 (defun enghi--xwidget-keys-string (keys)
