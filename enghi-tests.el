@@ -1,9 +1,8 @@
-;;; enghi-tests.el --- enghi.el のテスト -*- lexical-binding: t; -*-
+;;; enghi-tests.el --- Tests for enghi.el -*- lexical-binding: t; -*-
 
-;;; Commentary:
-;; 実際に動いているサーバに対して実行する。
-;;   emacs -Q --batch -L elisp -l elisp/enghi-tests.el -f ert-run-tests-batch-and-exit
-;; サーバの URL は環境変数 ENGHI_TEST_URL で指定する。
+;;; Commentary: Run against a running server. emacs -Q --batch -L elisp -l
+;;; elisp/enghi-tests.el -f ert-run-tests-batch-and-exit Specify the server
+;;; URL with the ENGHI_TEST_URL environment variable.
 
 ;;; Code:
 
@@ -16,60 +15,62 @@
   (format "%s-%s" prefix (random 100000)))
 
 (ert-deftest enghi-test-status ()
-  "サーバに繋がること."
+  "Connect to the server."
   (let ((st (enghi-status)))
     (should (alist-get 'ok st))))
 
 (ert-deftest enghi-test-page-round-trip ()
-  "作成 → 取得 → 編集 → 保存 が通ること."
-  (let* ((title (enghi-tests--unique "テスト記事"))
+  "Ensure create → fetch → edit → save passes."
+  (let* ((title (enghi-tests--unique "Test article"))
          (page (enghi-request "POST" "/api/pages"
-                              `((title . ,title) (body . "最初の本文") (tags . ["テスト"]))))
+                              `((title . ,title) (body . "Initial body") (tags . ["Test"]))))
          (slug (alist-get 'slug page)))
     (should (equal (alist-get 'title page) title))
     (let ((buf (enghi-open slug)))
       (unwind-protect
           (with-current-buffer buf
             (should (equal enghi-page-slug slug))
-            (should (equal (buffer-string) "最初の本文"))
+            (should (equal (buffer-string) "Initial body"))
             (should (= enghi-page-version 1))
-            ;; 編集して保存
+            ;; Edit and save
             (goto-char (point-max))
-            (insert "\n\n追記した。")
+            (insert "\n\nAppended.")
             (enghi-save)
             (should (= enghi-page-version 2))
             (should-not (buffer-modified-p))
-            ;; サーバ側に反映されている
-            (should (string-match-p "追記した。"
+            ;; Reflected on the server
+            (should (string-match-p "Appended."
                                     (alist-get 'body (enghi-page slug)))))
         (kill-buffer buf)))))
 
 (ert-deftest enghi-test-version-conflict-keeps-input ()
-  "版が競合したとき、手元の入力を捨てないこと."
-  (let* ((title (enghi-tests--unique "競合テスト"))
+  "Do not discard local input when versions conflict."
+  (let* ((title (enghi-tests--unique "Conflict test"))
          (page (enghi-request "POST" "/api/pages"
-                              `((title . ,title) (body . "元の本文"))))
+                              `((title . ,title) (body . "Original body"))))
          (slug (alist-get 'slug page))
          (buf (enghi-open slug)))
     (unwind-protect
         (with-current-buffer buf
-          ;; 別経路でサーバ側を更新する(Emacs のバッファは古いままになる)
+          ;; Update the server via another route (the Emacs buffer remains
+          ;; stale)
           (enghi-request "PUT" (format "/api/pages/%s" (url-hexify-string slug))
-                         `((title . ,title) (body . "別経路で書き換えた") (version . 1)))
+                         `((title . ,title) (body . "Rewritten via another route") (version . 1)))
           (erase-buffer)
-          (insert "Emacs 側で書いた内容")
-          ;; ediff を出さずに検査したいので差分表示だけ潰す
+          (insert "Content written on the Emacs side")
+          ;; Suppress only the diff display to test without opening ediff
           (cl-letf (((symbol-function 'enghi--show-conflict) (lambda (&rest _) nil)))
             (enghi-save))
-          ;; **入力が残っていること。**これが消えるのが最悪の壊れ方。
-          (should (equal (buffer-string) "Emacs 側で書いた内容"))
+          ;; **The input must remain.** Losing this is the worst kind of
+          ;; breakage.
+          (should (equal (buffer-string) "Content written on the Emacs side"))
           (should (= enghi-page-version 1)))
       (kill-buffer buf))))
 
 (ert-deftest enghi-test-title-conflict-signals ()
-  "タイトル衝突は version 競合とは別のエラーとして上がること."
-  (let* ((a (enghi-tests--unique "衝突A"))
-         (b (enghi-tests--unique "衝突B")))
+  "Signal title conflict as a different error from version conflict."
+  (let* ((a (enghi-tests--unique "Conflict A"))
+         (b (enghi-tests--unique "Conflict B")))
     (enghi-request "POST" "/api/pages" `((title . ,a) (body . "")))
     (let* ((pb (enghi-request "POST" "/api/pages" `((title . ,b) (body . ""))))
            (slug (alist-get 'slug pb))
@@ -77,93 +78,97 @@
                  (enghi-request "PUT" (format "/api/pages/%s" (url-hexify-string slug))
                                 `((title . ,a) (body . "") (version . 1)))
                  :type 'enghi-title-conflict)))
-      ;; 衝突相手のページが取れること(どのページと衝突したか分からないと辿れない)
+      ;; Get the conflicting page (cannot trace it without knowing which page
+      ;; it conflicted with)
       (should (equal (alist-get 'title (nth 2 err)) a)))))
 
 (ert-deftest enghi-test-search ()
-  "検索がサーバ側で行われ、結果が返ること."
-  (let ((title (enghi-tests--unique "検索対象")))
+  "Search on the server and return results."
+  (let ((title (enghi-tests--unique "Search target")))
     (enghi-request "POST" "/api/pages"
-                   `((title . ,title) (body . "オフィスの移転について書いた本文")))
-    (let ((results (enghi-search "オフィスの移転")))
+                   `((title . ,title) (body . "Body written about office relocation")))
+    (let ((results (enghi-search "Office relocation")))
       (should results)
       (should (seq-find (lambda (r) (equal (alist-get 'kind r) "page")) results)))
-    ;; 2 文字クエリ(日本語の主力)
-    (should (enghi-search "移転"))
-    ;; FTS5 の構文エラーになりうる文字列でも 500 にならない
+    ;; 2-character query (mainstay for Japanese)
+    (should (enghi-search "Relocation"))
+    ;; Does not return 500 even for strings that could cause FTS5 syntax
+    ;; errors
     (should (listp (enghi-search "C++")))
     (should (listp (enghi-search "a\"b")))))
 
 (ert-deftest enghi-test-capture ()
-  "どこからでも1行を Inbox に入れられること."
-  (let* ((title (enghi-tests--unique "捕まえた項目"))
+  "Ensure a single line can be put into the Inbox from anywhere."
+  (let* ((title (enghi-tests--unique "Captured item"))
          (task (enghi-capture title)))
     (should (equal (alist-get 'state task) "inbox"))
     (should (equal (alist-get 'title task) title))))
 
 (ert-deftest enghi-test-focus ()
-  "focus がサーバに受け付けられること(接続クライアントは 0 でよい)."
+  "Ensure focus is accepted by the server (connected clients can be 0)."
   (let ((res (enghi-focus "/wiki/test")))
     (should (alist-get 'ok res))))
 
 (ert-deftest enghi-test-error-when-server-down ()
-  "サーバが居ないときは分かるエラーになること."
+  "Signal a clear error when the server is not running."
   (let ((enghi-server-url "http://127.0.0.1:1"))
     (should-error (enghi-status) :type 'enghi-error)))
 
 (provide 'enghi-tests)
 ;;; enghi-tests.el ends here
 
-;;;; consult 連携(consult が入っている環境でのみ)
+;;;; consult integration (only in environments with consult)
 
 (when (require 'consult nil t)
   (require 'enghi-consult)
 
   (ert-deftest enghi-test-consult-candidates ()
-    "打鍵ごとの問い合わせが候補を返すこと."
-    (let ((title (enghi-tests--unique "consult 対象")))
+    "Return candidates for per-keystroke queries."
+    (let ((title (enghi-tests--unique "consult target")))
       (enghi-request "POST" "/api/pages"
-                     `((title . ,title) (body . "オフィスの移転について")))
-      (let ((cands (enghi-consult--candidates "オフィスの移転")))
+                     `((title . ,title) (body . "About office relocation")))
+      (let ((cands (enghi-consult--candidates "Office relocation")))
         (should cands)
-        ;; 元データが text property で載っていること(開くのに使う)
+        ;; Original data is attached as a text property (used to open it)
         (should (get-text-property 0 'enghi-result (car cands))))))
 
   (ert-deftest enghi-test-consult-no-client-side-filtering ()
-    "サーバが返した順序と件数をそのまま使うこと.
-Elisp 側で絞り込むと、bm25 の順位と 3 節の設計が無意味になる."
-    (let ((title (enghi-tests--unique "順序テスト")))
-      (enghi-request "POST" "/api/pages" `((title . ,title) (body . "共通語 の本文")))
-      (let ((server (enghi-search "共通語" nil 50))
-            (cands (enghi-consult--candidates "共通語")))
+    "Use the order and count returned by the server as is.
+Filtering on the Elisp side makes the bm25 ranking and section 3 design
+meaningless."
+    (let ((title (enghi-tests--unique "Order test")))
+      (enghi-request "POST" "/api/pages" `((title . ,title) (body . "Common word body")))
+      (let ((server (enghi-search "Common word" nil 50))
+            (cands (enghi-consult--candidates "Common word")))
         (should (= (length server) (length cands)))
         (should (equal (mapcar (lambda (r) (alist-get 'title r)) server)
                        (mapcar (lambda (c) (alist-get 'title (get-text-property 0 'enghi-result c)))
                                cands))))))
 
   (ert-deftest enghi-test-consult-short-input-skipped ()
-    "短すぎる入力ではサーバに問い合わせないこと."
+    "Do not query the server on input that is too short."
     (let ((enghi-consult-min-input 3))
-      (should-not (enghi-consult--candidates "あ"))
+      (should-not (enghi-consult--candidates "a"))
       (should-not (enghi-consult--candidates "")))))
 
-;;;; ブラウザに渡す URL
+;;;; URLs passed to the browser
 
 (ert-deftest enghi-test-browse-url-is-encoded ()
-  "日本語を含む URL がパーセントエンコードされて渡されること.
-生のまま渡すと、表示関数が何で符号化するかに結果が左右される."
+  "Ensure URLs containing Japanese are passed percent-encoded.
+Passing them raw makes the result depend on how the display function encodes
+them."
   (let (captured)
     (let ((enghi-browse-function (lambda (url) (setq captured url))))
       (enghi-browse "/wiki/日本語のタイトル"))
     (should (string-match-p "%E6%97%A5%E6%9C%AC%E8%AA%9E" captured))
     (should-not (string-match-p "日本語" captured))
-    ;; ASCII だけの場合は素のまま
+    ;; Leave as is if ASCII only
     (let ((enghi-browse-function (lambda (url) (setq captured url))))
       (enghi-browse "/wiki/design-notes"))
     (should (string-suffix-p "/wiki/design-notes" captured))))
 
 (ert-deftest enghi-test-browse-reports-dead-server ()
-  "サーバが落ちているときは、ブラウザに投げる前に分かるエラーにすること."
+  "Signal a clear error before passing to the browser when the server is down."
   (let ((enghi-server-url "http://127.0.0.1:1")
         (opened nil))
     (let ((enghi-browse-function (lambda (_url) (setq opened t))))

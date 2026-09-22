@@ -1,15 +1,15 @@
-# emacs は PATH に無いことがある(emacs-plus は Cellar に置かれる)。
-# 見つからなければ Homebrew の最新版を探す。EMACS=... で上書きできる。
+# emacs may not be in PATH (emacs-plus is placed in Cellar).
+# If not found, look for the latest Homebrew version. Can be overridden with EMACS=....
 EMACS ?= $(shell command -v emacs 2>/dev/null || \
            ls -1d /opt/homebrew/Cellar/emacs-plus@*/*/bin/emacs 2>/dev/null | sort -V | tail -1 || \
            echo emacs)
 
-# テストは**動いている enghi サーバ**に対して実行する。
-# 本番の DB を汚さないよう、テスト用の設定で別ポートに立てること(README 参照)。
+# Run tests against a **running enghi server**.
+# Start on a separate port with test settings to avoid dirtying the production DB (see README).
 ENGHI_TEST_URL ?= http://127.0.0.1:7799
 
-# consult / markdown-mode が入っていればそれも読む。
-# 入れずに走らせると該当テストが静かに飛び、「通った」ように見えるので注意。
+# Also load consult / markdown-mode if installed.
+# Note: running without them quietly skips tests, making them look like they passed.
 ELPA_LOAD := --eval '(dolist (d (append (file-expand-wildcards "~/.emacs.d/elpa/*") \
                                         (file-expand-wildcards "~/.config/emacs/elpa/*"))) \
                        (when (file-directory-p d) (add-to-list (quote load-path) d)))'
@@ -18,18 +18,18 @@ SRC := enghi.el enghi-consult.el
 
 .PHONY: test compile clean
 
-# 動いているサーバに対して ert を走らせる
+# Run ert against the running server
 test:
 	ENGHI_TEST_URL=$(ENGHI_TEST_URL) $(EMACS) -Q --batch $(ELPA_LOAD) \
 	  -L . -l enghi-tests.el -f ert-run-tests-batch-and-exit
 
-# バイトコンパイルして警告を見る(.elc は残さない)
+# Byte-compile and check warnings (do not keep .elc)
 compile:
 	$(EMACS) -Q --batch $(ELPA_LOAD) -L . \
 	  --eval '(setq byte-compile-error-on-warn t)' \
 	  -f batch-byte-compile $(SRC)
 	@rm -f *.elc
-	@echo "警告なし"
+	@echo "No warnings"
 
 clean:
 	rm -f *.elc

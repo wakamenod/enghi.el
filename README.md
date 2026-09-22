@@ -1,52 +1,51 @@
 # enghi.el
 
-ローカル専用の Wiki + GTD サーバ [enghi](../enghi) を Emacs から使うためのクライアントです。
+An Emacs client for [enghi](../enghi), a local-only Wiki + GTD server.
 
-- 記事を Emacs のバッファで開いて編集し、`C-c C-c` で保存
-- 打鍵ごとにサーバを引く横断検索
-- どこからでも1行を GTD の Inbox へ
-- GTD のタスクは Emacs 内の webkit に出したダッシュボードから扱う
-- Emacs で選んだものを、開きっぱなしのブラウザに表示させる
+- Open and edit pages in an Emacs buffer, then save with `C-c C-c`
+- Search across pages, querying the server on each keystroke
+- Send a line to the GTD Inbox from anywhere
+- Manage GTD tasks from a dashboard opened in webkit inside Emacs
+- Show items selected in Emacs in an already open browser
 
-## 必要なもの
+## Requirements
 
 | | | |
 |---|---|---|
-| Emacs | 28.1 以上 | |
-| [enghi](../enghi) サーバ | 常駐していること | |
-| `markdown-mode` | 任意 | 記事バッファで使います |
-| `consult` | 任意 | 打鍵ごとの検索に使います |
+| Emacs | 28.1 or later | |
+| [enghi](../enghi) server | Must be running | |
+| `markdown-mode` | Optional | Used in page buffers |
+| `consult` | Optional | Used for search on each keystroke |
 
-`markdown-mode` と `consult` は無くても動きます。それぞれ `fundamental-mode`、
-`completing-read` での検索になります。
+`markdown-mode` and `consult` are optional. Without them, it falls back to `fundamental-mode` and `completing-read` search respectively.
 
-## セットアップ
+## Setup
 
-### 1. サーバを起動する
+### 1. Start the server
 
 ```sh
 cd ../enghi
 make build
-./bin/enghi install-agent -load   # launchd で常駐させる
+./bin/enghi install-agent -load   # Run continuously with launchd
 ```
 
-常駐させずに試すだけなら `./bin/enghi serve` でも構いません。
-既定では `http://127.0.0.1:7777` で動きます。
+If you just want to try it without running it continuously, `./bin/enghi serve` also works.
+By default, it runs at `http://127.0.0.1:7777`.
 
 ```sh
 curl -s http://127.0.0.1:7777/api/status
 # {"db":"...","event_clients":0,"export_dir":"...","ok":true}
 ```
 
-### 2. 読み込む
+### 2. Load the package
 
 ```elisp
 (add-to-list 'load-path "~/Projects/SideProjects/enghi.el")
 (require 'enghi)
-(enghi-setup)          ; C-c n にキーマップを置きます
+(enghi-setup)          ; Set up keymap on C-c n
 ```
 
-`use-package` の場合:
+With `use-package`:
 
 ```elisp
 (use-package enghi
@@ -59,8 +58,7 @@ curl -s http://127.0.0.1:7777/api/status
   (autoload 'enghi-consult-search "enghi-consult" nil t))
 ```
 
-`leaf` の場合。`:bind-keymap` は展開時にキーマップを `eval` してしまい未ロードだと
-失敗するので、キーマップの autoload を張ります:
+With `leaf`. Because `:bind-keymap` evaluates the keymap during expansion and fails if it is not loaded yet, add an autoload for the keymap:
 
 ```elisp
 (leaf enghi
@@ -74,131 +72,114 @@ curl -s http://127.0.0.1:7777/api/status
   :custom ((enghi-server-url . "http://127.0.0.1:7777")))
 ```
 
-`straight.el` の場合:
+With `straight.el`:
 
 ```elisp
 (straight-use-package
  '(enghi :type built-in :local-repo "~/Projects/SideProjects/enghi.el" :files ("*.el")))
 ```
 
-### 3. 動作を確かめる
+### 3. Check that it works
 
-`M-x enghi-status` でサーバの状態が返ってくれば繋がっています。
-ポートを変えている場合は `enghi-server-url` を合わせてください。
+If `M-x enghi-status` returns the server status, you are connected.
+If you changed the port, update `enghi-server-url` to match.
 
-繋がらない状態でブラウザを開こうとした場合は、ブラウザに投げる前に
-Emacs 側でエラーになります（xwidget に投げると WebKit のエラーページが
-表示されるだけで、原因が分からないため）。
+If you try to open the browser while disconnected, Emacs errors before passing the request to the browser (passing it to xwidget would only show a WebKit error page without explaining the cause).
 
-### 4. 最初の記事を書く
+### 4. Write your first page
 
-`C-c n n` でタイトルを入力すると記事バッファが開きます。本文を書いて `C-c C-c` で保存します。
+Press `C-c n n` and enter a title to open a page buffer. Write the body and save with `C-c C-c`.
 
-## 使い方
+## Usage
 
-### キーマップ（`C-c n`）
+### Keymap (`C-c n`)
 
-| キー | コマンド | |
+| Key | Command | |
 |---|---|---|
-| `s` | `enghi-search-command` | 横断検索 |
-| `f` | `enghi-find-page` | 記事を選んで開く |
-| `n` | `enghi-new-page` | 新しい記事を作る |
-| `c` | `enghi-capture` | 1行を Inbox へ |
-| `o` | `enghi-focus-page` | ブラウザのタブをその記事へ飛ばす |
-| `b` | `enghi-open-in-browser` | ブラウザで開く |
-| `d` | `enghi-browse-dashboard` | ダッシュボード（GTD もここ）を開く |
+| `s` | `enghi-search-command` | Search across pages |
+| `f` | `enghi-find-page` | Select and open a page |
+| `n` | `enghi-new-page` | Create a new page |
+| `c` | `enghi-capture` | Send a line to Inbox |
+| `o` | `enghi-focus-page` | Focus browser tab on the page |
+| `b` | `enghi-open-in-browser` | Open in browser |
+| `d` | `enghi-browse-dashboard` | Open dashboard (including GTD) |
 
-### 記事バッファ
+### Page buffer
 
-`markdown-mode` に `enghi-page-mode` が重なります。本文は Markdown の原文そのものです。
+`enghi-page-mode` runs on top of `markdown-mode`. The buffer content is raw Markdown.
 
-| キー | |
+| Key | |
 |---|---|
-| `C-c C-c` | 保存 |
-| `C-c C-r` | タイトルを変更 |
-| `C-c C-t` | タグを編集 |
-| `C-c C-l` | 記事を選んで `[[リンク]]` を挿入 |
-| `C-c C-o` | ブラウザで開く |
-| `C-c C-k` | サーバの内容に戻す |
+| `C-c C-c` | Save |
+| `C-c C-r` | Change title |
+| `C-c C-t` | Edit tags |
+| `C-c C-l` | Select a page and insert `[[link]]` |
+| `C-c C-o` | Open in browser |
+| `C-c C-k` | Revert to server content |
 
-`[[まだ無い記事]]` のように、存在しない記事へのリンクも書けます。未解決リンクとして
-保持され、その名前の記事を作った時点で自動的に繋がります。
+You can link to pages that do not exist yet, like `[[non-existent page]]`. They are kept as unresolved links and connect automatically once you create a page with that name.
 
-タイトルを変更すると、旧タイトルは別名として残ります。`[[旧タイトル]]` と書かれた
-他の記事のリンクはそのまま機能します。
+When you change a title, the old title remains as an alias. Links in other pages written as `[[old title]]` continue to work.
 
-## 見ながら書く
+## Edit while viewing
 
-webkit で記事を開いている状態（`C-c n b` など）で `E` を押すと、その記事が
-下の窓に Emacs バッファとして開きます。上が表示、下が編集です。
+When viewing a page in webkit (such as with `C-c n b`), pressing `E` opens that page in the lower window as an Emacs buffer. The top window displays it, and the bottom window edits it.
 
-| キー | | |
+| Key | | |
 |---|---|---|
-| `E` | `enghi-xwidget-edit-page` | 表示中の記事を下の窓で編集する |
+| `E` | `enghi-xwidget-edit-page` | Edit the displayed page in the lower window |
 
-押せるキーは**バッファのヘッダ行に出ます**。開いている画面に合わせて、記事なら
-`E 編集` など、GTD の一覧なら `n 次の行動` `d 完了` などに切り替わります。
+Available keys **appear in the buffer header line**. They change depending on the current view: for a page, you see options like `E edit`; for the GTD list, options like `n next action` and `d done`.
 
-GTD の一覧の操作はページ側が持っているので、`j` `k` `RET` `n` `w` `s` `l` `m`
-`d` `S` `f` `t` `x` `c` `/` はそのままページへ渡します（`e` の
-`xwidget-webkit-edit-mode` に入らなくても押せます）。`e` 自体は xwidget 本来の
-「キーをページ側へ渡す」モードなので潰していません。
+Because actions in the GTD list are handled by the page itself, keys like `j` `k` `RET` `n` `w` `s` `l` `m` `d` `S` `f` `t` `x` `c` `/` pass straight through to the page (you can press them without entering `xwidget-webkit-edit-mode` via `e`). `e` itself is kept intact, as it is the native xwidget mode for passing keys to the page.
 
-`C-c C-c` で保存すると、サーバが接続中の全クライアントに更新を配信し、その記事を
-表示している画面は自分で読み込み直します。Emacs から更新を掛ける必要はありません。
-読んでいた位置はそのまま持ち越されます。
+When you save with `C-c C-c`, the server broadcasts the update to all connected clients, and any view displaying that page reloads automatically. You do not need to trigger a refresh from Emacs. Your scroll position is preserved.
 
-配信されるのは保存の時点です。打っている途中の内容は送られません。
+Updates are sent only when you save. In-progress typing is not sent.
 
-## 保存が競合したとき
+## Save conflicts
 
-編集中に他の経路で更新されていた場合は、`ediff` でサーバ側と手元の内容を並べます。
-手元の編集内容はバッファに残ったままなので、見比べてから保存し直せます。
+If a page was updated through another path while you were editing, `ediff` opens to show the server version and your local version side by side. Your local edits remain in the buffer, so you can compare them and save again.
 
-タイトルを変更しようとして既存の記事と重複した場合は、衝突した相手を表示して別の
-タイトルを尋ねます。本文はそのまま保持されます。
+If you try to rename a page to a title that already exists, it displays the conflicting page and prompts for a different title. The body text is preserved.
 
-## ブラウザとの連携
+## Browser integration
 
-別のディスプレイにブラウザを開いたままにしておくと、Emacs で選んだものを追従させられます。
+If you keep a browser open on another display, it can follow what you select in Emacs.
 
 ```
 C-c n o
 ```
 
-サーバが接続中の全タブに遷移を配信します。サーバを再起動してもブラウザ側から繋ぎ直します。
+The server broadcasts navigation events to all connected tabs. Even if the server restarts, the browser automatically reconnects.
 
-記事を Emacs 内に表示したい場合は、表示関数を差し替えられます。
+If you want to view pages inside Emacs, you can change the browse function.
 
 ```elisp
-(setq enghi-browse-function #'enghi-browse-in-xwidget)  ; 既定は #'browse-url
+(setq enghi-browse-function #'enghi-browse-in-xwidget)  ; Default is #'browse-url
 ```
 
-`enghi-browse-in-xwidget` は xwidget の webkit で開き、ビューの周りに少し余白を
-残します（`xwidget-webkit-browse-url` だとページの縁がフリンジやモードラインに
-貼り付きます）。余白は `enghi-xwidget-padding` で変えられます。整数なら四方に同じだけ、
-`(横 . 縦)` なら左右と上下を別々に。`0` にするとバッファいっぱいに広がります。
-余白は enghi が開いたバッファにだけ効きます。
+`enghi-browse-in-xwidget` opens pages in xwidget webkit and leaves some padding around the view (with `xwidget-webkit-browse-url`, the edges of the page stick directly to the fringes and mode line). You can adjust the padding with `enghi-xwidget-padding`: an integer applies equally to all four sides, while `(horizontal . vertical)` sets left/right and top/bottom separately. Setting it to `0` expands to fill the entire buffer. Padding only applies to buffers opened by `enghi`.
 
-## 設定
+## Configuration
 
-| 変数 | 既定 | |
+| Variable | Default | |
 |---|---|---|
-| `enghi-server-url` | `http://127.0.0.1:7777` | サーバの URL |
-| `enghi-request-timeout` | `10` | リクエストのタイムアウト（秒） |
-| `enghi-browse-function` | `#'browse-url` | ブラウザで開くときの関数 |
-| `enghi-xwidget-padding` | `(24 . 12)` | `enghi-browse-in-xwidget` の余白、`(左右 . 上下)` ピクセル |
-| `enghi-consult-min-input` | `1` | 何文字入力したら検索を始めるか |
+| `enghi-server-url` | `http://127.0.0.1:7777` | Server URL |
+| `enghi-request-timeout` | `10` | Request timeout (seconds) |
+| `enghi-browse-function` | `#'browse-url` | Function to open in browser |
+| `enghi-xwidget-padding` | `(24 . 12)` | Padding for `enghi-browse-in-xwidget`, in `(horizontal . vertical)` pixels |
+| `enghi-consult-min-input` | `1` | Number of characters typed before search starts |
 
-パスワードやトークンの設定はありません。サーバはループバックからの接続のみを受け付けます。
+There are no passwords or tokens to configure. The server only accepts connections from loopback.
 
-## 開発
+## Development
 
 ```sh
-make compile    # バイトコンパイル（警告はエラー扱い）
+make compile    # Byte-compile (warnings treated as errors)
 ```
 
-テストは動いているサーバに対して実行します。別ポートにテスト用のサーバを立ててください。
+Tests run against a live server. Start a test server on a different port.
 
 ```sh
 cat > /tmp/enghi-test.toml <<'TOML'
@@ -211,10 +192,10 @@ TOML
 make test
 ```
 
-## 構成
+## Structure
 
-| ファイル | |
+| File | |
 |---|---|
-| `enghi.el` | API クライアント、記事の編集、capture、キーマップ |
-| `enghi-consult.el` | consult を使った検索 |
-| `enghi-tests.el` | テスト |
+| `enghi.el` | API client, page editing, capture, keymaps |
+| `enghi-consult.el` | Search using consult |
+| `enghi-tests.el` | Tests |
