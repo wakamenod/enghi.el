@@ -1,6 +1,9 @@
 # enghi.el
 
-An Emacs client for [enghi](../enghi), a local-only Wiki + GTD server.
+*English · [日本語](README.ja.md)*
+
+An Emacs client for [enghi](https://github.com/wakamenod/enghi), a local-only wiki + GTD
+server.
 
 - Open and edit pages in an Emacs buffer, then save with `C-c C-c`
 - Search across pages, querying the server on each keystroke
@@ -13,7 +16,7 @@ An Emacs client for [enghi](../enghi), a local-only Wiki + GTD server.
 | | | |
 |---|---|---|
 | Emacs | 28.1 or later | |
-| [enghi](../enghi) server | Must be running | |
+| [enghi](https://github.com/wakamenod/enghi) server | Must be running | |
 | `markdown-mode` | Optional | Used in page buffers |
 | `consult` | Optional | Used for search on each keystroke |
 
