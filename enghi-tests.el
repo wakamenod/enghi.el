@@ -174,3 +174,52 @@ them."
     (let ((enghi-browse-function (lambda (_url) (setq opened t))))
       (should-error (enghi-browse "/wiki/foo") :type 'error))
     (should-not opened)))
+
+;;;; Keys sent to the webkit page
+
+(defmacro enghi-tests--with-xwidget-stubs (path &rest body)
+  "Run BODY with webkit stubbed out, showing enghi PATH.
+Bind `scripts' to the JS sent and `forwarded' to whether it went forward."
+  (declare (indent 1))
+  `(let (scripts forwarded)
+     (cl-letf (((symbol-function 'xwidget-webkit-current-session) (lambda () 'session))
+               ((symbol-function 'xwidget-webkit-execute-script)
+                (lambda (session script &optional _cb)
+                  (should (eq session 'session))
+                  (push script scripts)))
+               ((symbol-function 'xwidget-webkit-forward) (lambda () (setq forwarded t)))
+               ((symbol-function 'enghi--xwidget-path) (lambda () ,path)))
+       ,@body)))
+
+(ert-deftest enghi-test-xwidget-key-script ()
+  "Ensure keys become a keydown with a properly escaped key."
+  (should (equal (enghi--xwidget-key-name ?j) "j"))
+  (should (equal (enghi--xwidget-key-name ?/) "/"))
+  (should (equal (enghi--xwidget-key-name 13) "Enter"))
+  (should (equal (enghi--xwidget-key-name 'return) "Enter"))
+  (should (equal (enghi--xwidget-key-script "j")
+                 "document.dispatchEvent(new KeyboardEvent('keydown', {key: \"j\", bubbles: true}));"))
+  (should (string-match-p "{key: \"\\\\\"\"" (enghi--xwidget-key-script "\"")))
+  (should (string-match-p "{key: \"\\\\\\\\\"" (enghi--xwidget-key-script "\\"))))
+
+(ert-deftest enghi-test-xwidget-send-key ()
+  "Ensure the invoking key is sent to the page."
+  (enghi-tests--with-xwidget-stubs "/"
+    (let ((last-command-event ?k)) (enghi-xwidget-send-key))
+    (let ((last-command-event 13)) (enghi-xwidget-send-key))
+    (should (string-match-p "key: \"k\"" (nth 1 scripts)))
+    (should (string-match-p "key: \"Enter\"" (nth 0 scripts)))))
+
+(ert-deftest enghi-test-xwidget-f-dispatch ()
+  "Ensure `f' files in the GTD list and goes forward elsewhere."
+  (should (eq (lookup-key enghi-xwidget-mode-map "f") #'enghi-xwidget-file-or-forward))
+  (let ((last-command-event ?f))
+    (enghi-tests--with-xwidget-stubs "/gtd/inbox"
+      (enghi-xwidget-file-or-forward)
+      (should (string-match-p "key: \"f\"" (car scripts)))
+      (should-not forwarded))
+    (dolist (path '("/" "/wiki/foo" nil))
+      (enghi-tests--with-xwidget-stubs path
+        (enghi-xwidget-file-or-forward)
+        (should-not scripts)
+        (should forwarded)))))

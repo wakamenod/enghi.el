@@ -232,7 +232,8 @@ buffer."
 (declare-function xwidget-webkit-adjust-size-to-window "xwidget" (xwidget &optional window))
 (declare-function xwidget-webkit-uri "xwidget" (xwidget))
 (declare-function xwidget-at "xwidget" (pos))
-(declare-function xwidget-webkit-pass-command-event "xwidget" ())
+(declare-function xwidget-webkit-execute-script "xwidget" (xwidget script &optional callback))
+(declare-function xwidget-webkit-forward "xwidget" ())
 
 (defun enghi--xwidget-padding (axis)
   "Return the padding for AXIS from `enghi-xwidget-padding'.
@@ -258,8 +259,10 @@ is called with the target buffer current during size adjustment, so checking
     ;; consumes keys in xwidget, so pass only these keys through to the page.
     ;; (Allows pressing them without entering `xwidget-webkit-edit-mode' with
     ;; `e')
-    (dolist (key '("j" "k" "RET" "n" "w" "s" "l" "m" "d" "S" "f" "t" "x" "c" "/"))
-      (define-key map (kbd key) #'xwidget-webkit-pass-command-event))
+    (dolist (key '("j" "k" "RET" "n" "w" "s" "l" "m" "d" "S" "t" "x" "c" "/"))
+      (define-key map (kbd key) #'enghi-xwidget-send-key))
+    ;; `f' is webkit's "forward" everywhere except the GTD list
+    (define-key map (kbd "f") #'enghi-xwidget-file-or-forward)
     map)
   "Keymap for webkit buffers opened by enghi.
 Since `e' is xwidget's native `xwidget-webkit-edit-mode' (passes keys to the
@@ -293,6 +296,36 @@ view."
     (when (string-match "\\`/wiki/\\([^/]+\\)\\'" path)
       ;; The slug is percent-encoded in the URL
       (decode-coding-string (url-unhex-string (match-string 1 path)) 'utf-8))))
+
+;;;; Sending keys to the page
+;;
+;; `xwidget-webkit-pass-command-event' does nothing on macOS: the function it
+;; relies on (`xwidget-perform-lispy-event') is implemented only for GTK. So
+;; dispatch a keydown event with JS instead, which reaches the page's
+;; document-level handler (`web/static/app.js') on every platform.
+
+(defun enghi--xwidget-key-name (event)
+  "Return the KeyboardEvent `key' value for EVENT."
+  (if (memq event '(13 return)) "Enter" (string event)))
+
+(defun enghi--xwidget-key-script (key)
+  "Return JS that dispatches a keydown for KEY to the page's document."
+  (format "document.dispatchEvent(new KeyboardEvent('keydown', {key: %s, bubbles: true}));"
+          (json-encode-string key)))
+
+(defun enghi-xwidget-send-key ()
+  "Send the key used to invoke this command to the page as a keydown."
+  (interactive)
+  (xwidget-webkit-execute-script
+   (xwidget-webkit-current-session)
+   (enghi--xwidget-key-script (enghi--xwidget-key-name last-command-event))))
+
+(defun enghi-xwidget-file-or-forward ()
+  "Send `f' (file) to the page in the GTD list; otherwise go forward."
+  (interactive)
+  (if (string-prefix-p "/gtd" (or (enghi--xwidget-path) ""))
+      (enghi-xwidget-send-key)
+    (xwidget-webkit-forward)))
 
 ;;;; Header line — show available keys tailored to the screen
 ;;
