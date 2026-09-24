@@ -234,6 +234,7 @@ buffer."
 (declare-function xwidget-at "xwidget" (pos))
 (declare-function xwidget-webkit-execute-script "xwidget" (xwidget script &optional callback))
 (declare-function xwidget-webkit-forward "xwidget" ())
+(declare-function xwidget-webkit-goto-uri "xwidget" (xwidget uri))
 
 (defun enghi--xwidget-padding (axis)
   "Return the padding for AXIS from `enghi-xwidget-padding'.
@@ -259,10 +260,10 @@ is called with the target buffer current during size adjustment, so checking
     ;; consumes keys in xwidget, so pass only these keys through to the page.
     ;; (Allows pressing them without entering `xwidget-webkit-edit-mode' with
     ;; `e')
-    (dolist (key '("j" "k" "RET" "n" "w" "s" "l" "m" "d" "S" "t" "x" "c" "/"))
-      (define-key map (kbd key) #'enghi-xwidget-send-key))
-    ;; `f' is webkit's "forward" everywhere except the GTD list
-    (define-key map (kbd "f") #'enghi-xwidget-file-or-forward)
+    ;; `enghi-xwidget-key' decides per screen what each one does.
+    (dolist (key '("j" "k" "RET" "n" "w" "s" "l" "m" "d" "S" "f" "t" "x" "c" "/"
+                   "i" "p"))
+      (define-key map (kbd key) #'enghi-xwidget-key))
     map)
   "Keymap for webkit buffers opened by enghi.
 Since `e' is xwidget's native `xwidget-webkit-edit-mode' (passes keys to the
@@ -320,18 +321,47 @@ view."
    (xwidget-webkit-current-session)
    (enghi--xwidget-key-script (enghi--xwidget-key-name last-command-event))))
 
-(defun enghi-xwidget-file-or-forward ()
-  "Send `f' (file) to the page in the GTD list; otherwise go forward."
+(defconst enghi--xwidget-gtd-lists
+  '(("i" . "/gtd/inbox") ("n" . "/gtd/next") ("w" . "/gtd/waiting")
+    ("s" . "/gtd/scheduled") ("m" . "/gtd/someday") ("p" . "/gtd/projects"))
+  "Keys on the GTD top page and the lists they open.")
+
+(defun enghi--xwidget-gtd-top-p (path)
+  "Return non-nil if PATH is the GTD top page."
+  (member path '("/gtd" "/gtd/")))
+
+(defun enghi-xwidget-key ()
+  "Handle the key used to invoke this command, according to the screen.
+
+On the GTD top page, keys in `enghi--xwidget-gtd-lists' open that list, `c'
+captures from Emacs (`enghi-capture'), and the rest do nothing. Elsewhere the
+key goes to the page. `f' stays webkit's forward everywhere except the GTD
+lists."
   (interactive)
-  (if (string-prefix-p "/gtd" (or (enghi--xwidget-path) ""))
-      (enghi-xwidget-send-key)
-    (xwidget-webkit-forward)))
+  (let ((path (or (enghi--xwidget-path) ""))
+        (key (enghi--xwidget-key-name last-command-event)))
+    (cond ((enghi--xwidget-gtd-top-p path)
+           (cond ((equal key "c") (call-interactively #'enghi-capture))
+                 ((assoc key enghi--xwidget-gtd-lists)
+                  (xwidget-webkit-goto-uri
+                   (xwidget-webkit-current-session)
+                   (concat (string-remove-suffix "/" enghi-server-url)
+                           (cdr (assoc key enghi--xwidget-gtd-lists)))))
+                 ((equal key "f") (xwidget-webkit-forward))))
+          ((and (equal key "f") (not (string-prefix-p "/gtd" path)))
+           (xwidget-webkit-forward))
+          (t (enghi-xwidget-send-key)))))
 
 ;;;; Header line — show available keys tailored to the screen
 ;;
 ;; **Assume keys won't be remembered.** Since GTD state changes are handled
 ;; by page-side JS (`enghi-xwidget-mode-map' forwards them), show different
 ;; keys for each screen.
+
+(defconst enghi--xwidget-keys-gtd-top
+  '(("i" . "Inbox") ("n" . "Next") ("w" . "Waiting") ("s" . "Scheduled")
+    ("m" . "Someday") ("p" . "Projects") ("c" . "Capture"))
+  "Keys available on the GTD top page.")
 
 (defconst enghi--xwidget-keys-gtd
   '(("j/k" . "Move") ("RET" . "Open") ("n" . "Next") ("w" . "Waiting")
@@ -362,6 +392,8 @@ view."
   (let ((path (enghi--xwidget-path)))
     (concat " "
             (cond ((null path) "")
+                  ((enghi--xwidget-gtd-top-p path)
+                   (enghi--xwidget-keys-string enghi--xwidget-keys-gtd-top))
                   ((string-prefix-p "/gtd" path)
                    (enghi--xwidget-keys-string enghi--xwidget-keys-gtd))
                   ((string-prefix-p "/wiki/" path)

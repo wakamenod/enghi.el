@@ -151,6 +151,10 @@ GTD リストの操作はページ側で処理されるため、`j` `k` `RET` `n
 「進む」として働く。キーは JavaScript の `keydown` イベントとして送るので、
 `xwidget-webkit-pass-command-event` が何もしない macOS でも動く。
 
+GTD トップ (`/gtd`) だけはキーが別で、`i` `n` `w` `s` `m` `p` でそれぞれ Inbox、
+Next Actions、Waiting For、Scheduled、Someday/Maybe、Projects を開き、`c` は Emacs
+側の `enghi-capture` でキャプチャする。
+
 `C-c C-c` で保存すると、サーバが接続中の全クライアントへ更新を配信し、該当ページを
 表示しているビューが自動でリロードされる。Emacs から再読み込みする必要はない。
 スクロール位置も保持される。

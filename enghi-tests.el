@@ -211,15 +211,38 @@ Bind `scripts' to the JS sent and `forwarded' to whether it went forward."
     (should (string-match-p "key: \"Enter\"" (nth 0 scripts)))))
 
 (ert-deftest enghi-test-xwidget-f-dispatch ()
-  "Ensure `f' files in the GTD list and goes forward elsewhere."
-  (should (eq (lookup-key enghi-xwidget-mode-map "f") #'enghi-xwidget-file-or-forward))
+  "Ensure `f' files in the GTD lists and goes forward elsewhere."
+  (should (eq (lookup-key enghi-xwidget-mode-map "f") #'enghi-xwidget-key))
   (let ((last-command-event ?f))
     (enghi-tests--with-xwidget-stubs "/gtd/inbox"
-      (enghi-xwidget-file-or-forward)
+      (enghi-xwidget-key)
       (should (string-match-p "key: \"f\"" (car scripts)))
       (should-not forwarded))
-    (dolist (path '("/" "/wiki/foo" nil))
+    (dolist (path '("/" "/wiki/foo" "/gtd" nil))
       (enghi-tests--with-xwidget-stubs path
-        (enghi-xwidget-file-or-forward)
+        (enghi-xwidget-key)
         (should-not scripts)
         (should forwarded)))))
+
+(ert-deftest enghi-test-xwidget-gtd-top ()
+  "Ensure the GTD top page opens lists and captures from Emacs."
+  (let ((enghi-server-url "http://127.0.0.1:7777/")
+        opened captured)
+    (cl-letf (((symbol-function 'xwidget-webkit-goto-uri)
+               (lambda (_session uri) (push uri opened)))
+              ((symbol-function 'enghi-capture)
+               (lambda (title) (interactive (list "Buy milk")) (setq captured title))))
+      (enghi-tests--with-xwidget-stubs "/gtd"
+        (dolist (key '(?i ?n ?w ?s ?m ?p))
+          (let ((last-command-event key)) (enghi-xwidget-key)))
+        (should (equal (reverse opened)
+                       (mapcar (lambda (p) (concat "http://127.0.0.1:7777" p))
+                               '("/gtd/inbox" "/gtd/next" "/gtd/waiting"
+                                 "/gtd/scheduled" "/gtd/someday" "/gtd/projects"))))
+        (let ((last-command-event ?c)) (enghi-xwidget-key))
+        (should (equal captured "Buy milk"))
+        ;; The page's own keys do nothing here
+        (dolist (key '(?j ?k 13 ?d ?/))
+          (let ((last-command-event key)) (enghi-xwidget-key)))
+        (should-not scripts)
+        (should (= (length opened) 6))))))

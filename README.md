@@ -136,6 +136,8 @@ Available keys **appear in the buffer header line**. They change depending on th
 
 Because actions in the GTD list are handled by the page itself, keys like `j` `k` `RET` `n` `w` `s` `l` `m` `d` `S` `f` `t` `x` `c` `/` pass straight through to the page (you can press them without entering `xwidget-webkit-edit-mode` via `e`). `e` itself is kept intact, as it is the native xwidget mode for passing keys to the page. `f` goes to the page only in the GTD list; on other screens it keeps its usual webkit meaning (forward). The keys are delivered as JavaScript `keydown` events, so this also works on macOS, where `xwidget-webkit-pass-command-event` does nothing.
 
+The GTD top page (`/gtd`) has its own keys instead: `i` `n` `w` `s` `m` `p` open Inbox, Next Actions, Waiting For, Scheduled, Someday/Maybe and Projects, and `c` captures with `enghi-capture` in Emacs.
+
 When you save with `C-c C-c`, the server broadcasts the update to all connected clients, and any view displaying that page reloads automatically. You do not need to trigger a refresh from Emacs. Your scroll position is preserved.
 
 Updates are sent only when you save. In-progress typing is not sent.
