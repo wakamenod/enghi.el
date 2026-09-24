@@ -235,6 +235,7 @@ buffer."
 (declare-function xwidget-webkit-execute-script "xwidget" (xwidget script &optional callback))
 (declare-function xwidget-webkit-forward "xwidget" ())
 (declare-function xwidget-webkit-goto-uri "xwidget" (xwidget uri))
+(declare-function xwidget-webkit-reload "xwidget" ())
 
 (defun enghi--xwidget-padding (axis)
   "Return the padding for AXIS from `enghi-xwidget-padding'.
@@ -341,7 +342,11 @@ lists."
   (let ((path (or (enghi--xwidget-path) ""))
         (key (enghi--xwidget-key-name last-command-event)))
     (cond ((enghi--xwidget-gtd-top-p path)
-           (cond ((equal key "c") (call-interactively #'enghi-capture))
+           (cond ((equal key "c")
+                  (call-interactively #'enghi-capture)
+                  ;; The page does not follow task updates, so refresh the
+                  ;; counts ourselves
+                  (xwidget-webkit-reload))
                  ((assoc key enghi--xwidget-gtd-lists)
                   (xwidget-webkit-goto-uri
                    (xwidget-webkit-current-session)

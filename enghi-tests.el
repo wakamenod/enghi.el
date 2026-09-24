@@ -227,11 +227,12 @@ Bind `scripts' to the JS sent and `forwarded' to whether it went forward."
 (ert-deftest enghi-test-xwidget-gtd-top ()
   "Ensure the GTD top page opens lists and captures from Emacs."
   (let ((enghi-server-url "http://127.0.0.1:7777/")
-        opened captured)
+        opened captured reloaded)
     (cl-letf (((symbol-function 'xwidget-webkit-goto-uri)
                (lambda (_session uri) (push uri opened)))
               ((symbol-function 'enghi-capture)
-               (lambda (title) (interactive (list "Buy milk")) (setq captured title))))
+               (lambda (title) (interactive (list "Buy milk")) (setq captured title)))
+              ((symbol-function 'xwidget-webkit-reload) (lambda () (setq reloaded t))))
       (enghi-tests--with-xwidget-stubs "/gtd"
         (dolist (key '(?i ?n ?w ?s ?m ?p))
           (let ((last-command-event key)) (enghi-xwidget-key)))
@@ -241,6 +242,7 @@ Bind `scripts' to the JS sent and `forwarded' to whether it went forward."
                                  "/gtd/scheduled" "/gtd/someday" "/gtd/projects"))))
         (let ((last-command-event ?c)) (enghi-xwidget-key))
         (should (equal captured "Buy milk"))
+        (should reloaded)
         ;; The page's own keys do nothing here
         (dolist (key '(?j ?k 13 ?d ?/))
           (let ((last-command-event key)) (enghi-xwidget-key)))
