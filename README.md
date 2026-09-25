@@ -2,14 +2,13 @@
 
 *English · [日本語](README.ja.md)*
 
-An Emacs client for [enghi](https://github.com/wakamenod/enghi), a local-only wiki + GTD
-server.
+An Emacs client for [enghi](https://github.com/wakamenod/enghi), a local-only wiki and GTD server.
 
-- Open and edit pages in an Emacs buffer, then save with `C-c C-c`
-- Search across pages, querying the server on each keystroke
-- Send a line to the GTD Inbox from anywhere
-- Manage GTD tasks from a dashboard opened in webkit inside Emacs
-- Show items selected in Emacs in an already open browser
+- Open pages in an Emacs buffer, edit them, and save with `C-c C-c`
+- Search all pages as you type, with each keystroke sent to the server
+- Send a one-line item to the GTD Inbox from anywhere
+- Manage GTD tasks from a dashboard in Emacs's webkit view
+- Have an open browser show what you select in Emacs
 
 ## Requirements
 
@@ -20,7 +19,7 @@ server.
 | `markdown-mode` | Optional | Used in page buffers |
 | `consult` | Optional | Used for search on each keystroke |
 
-`markdown-mode` and `consult` are optional. Without them, it falls back to `fundamental-mode` and `completing-read` search respectively.
+`markdown-mode` and `consult` are optional. Without them, enghi.el uses `fundamental-mode` and `completing-read` search instead.
 
 ## Setup
 
@@ -32,27 +31,46 @@ make build
 ./bin/enghi install-agent -load   # Run continuously with launchd
 ```
 
-If you just want to try it without running it continuously, `./bin/enghi serve` also works.
-By default, it runs at `http://127.0.0.1:7777`.
+To try it without keeping it running, use `./bin/enghi serve`.
+By default, the server listens on `http://127.0.0.1:7777`.
 
 ```sh
 curl -s http://127.0.0.1:7777/api/status
 # {"db":"...","event_clients":0,"export_dir":"...","ok":true}
 ```
 
-### 2. Load the package
+### 2. Install the package
 
-```elisp
-(add-to-list 'load-path "~/Projects/SideProjects/enghi.el")
-(require 'enghi)
-(enghi-setup)          ; Set up keymap on C-c n
-```
-
-With `use-package`:
+Install it from GitHub with `use-package`. The `:vc` keyword needs Emacs 30 or later.
 
 ```elisp
 (use-package enghi
-  :load-path "~/Projects/SideProjects/enghi.el"
+  :vc (:url "https://github.com/wakamenod/enghi.el" :rev :newest)
+  :bind-keymap ("C-c n" . enghi-command-map)
+  :custom
+  (enghi-server-url "http://127.0.0.1:7777"))
+```
+
+`C-c n` loads the package the first time you press it.
+
+On Emacs 29, `use-package` has no `:vc` keyword. Install the package once with `M-x package-vc-install RET https://github.com/wakamenod/enghi.el RET`, then leave `:vc` out:
+
+```elisp
+(use-package enghi
+  :bind-keymap ("C-c n" . enghi-command-map)
+  :custom
+  (enghi-server-url "http://127.0.0.1:7777"))
+```
+
+Emacs 28 has no `package-vc-install`, and you need to install `use-package` from MELPA. Clone the repository and load it from there:
+
+```sh
+git clone https://github.com/wakamenod/enghi.el ~/.emacs.d/site-lisp/enghi.el
+```
+
+```elisp
+(use-package enghi
+  :load-path "~/.emacs.d/site-lisp/enghi.el"
   :commands (enghi-find-page enghi-capture enghi-browse-dashboard enghi-search-command)
   :bind-keymap ("C-c n" . enghi-command-map)
   :custom
@@ -61,37 +79,18 @@ With `use-package`:
   (autoload 'enghi-consult-search "enghi-consult" nil t))
 ```
 
-With `leaf`. Because `:bind-keymap` evaluates the keymap during expansion and fails if it is not loaded yet, add an autoload for the keymap:
-
-```elisp
-(leaf enghi
-  :load-path "~/Projects/SideProjects/enghi.el"
-  :commands (enghi-find-page enghi-new-page enghi-capture enghi-search-command
-             enghi-open-in-browser enghi-focus-page enghi-browse-dashboard enghi-status)
-  :init
-  (autoload 'enghi-command-map "enghi" nil nil 'keymap)
-  (autoload 'enghi-consult-search "enghi-consult" nil t)
-  :bind (("C-c n" . enghi-command-map))
-  :custom ((enghi-server-url . "http://127.0.0.1:7777")))
-```
-
-With `straight.el`:
-
-```elisp
-(straight-use-package
- '(enghi :type built-in :local-repo "~/Projects/SideProjects/enghi.el" :files ("*.el")))
-```
+To update it, run `git pull` in that directory.
 
 ### 3. Check that it works
 
-If `M-x enghi-status` returns the server status, you are connected.
-If you changed the port, update `enghi-server-url` to match.
+Run `M-x enghi-status`. If it shows the server status, you're connected.
+If you changed the port, set `enghi-server-url` to match.
 
-If you try to open the browser while disconnected, Emacs errors before passing the request to the browser (passing it to xwidget would only show a WebKit error page without explaining the cause).
+If the server isn't reachable, opening a page in the browser fails in Emacs, before the request reaches the browser. Otherwise xwidget would show only a WebKit error page that doesn't say what went wrong.
 
 ### 4. Write your first page
 
-Press `C-c n n` and enter a title to open a page buffer. Write the body and save with `C-c C-c`.
+Press `C-c n n` and enter a title to open a page buffer. Write the body, then save with `C-c C-c`.
 
 ## Usage
 
@@ -109,7 +108,7 @@ Press `C-c n n` and enter a title to open a page buffer. Write the body and save
 
 ### Page buffer
 
-`enghi-page-mode` runs on top of `markdown-mode`. The buffer content is raw Markdown.
+`enghi-page-mode` runs on top of `markdown-mode`. The buffer holds plain Markdown.
 
 | Key | |
 |---|---|
@@ -120,33 +119,53 @@ Press `C-c n n` and enter a title to open a page buffer. Write the body and save
 | `C-c C-o` | Open in browser |
 | `C-c C-k` | Revert to server content |
 
-You can link to pages that do not exist yet, like `[[non-existent page]]`. They are kept as unresolved links and connect automatically once you create a page with that name.
+You can link to a page that doesn't exist yet, such as `[[non-existent page]]`. The link stays unresolved until you create a page with that name, and then connects automatically.
 
-When you change a title, the old title remains as an alias. Links in other pages written as `[[old title]]` continue to work.
+When you rename a page, the old title stays as an alias, so `[[old title]]` links in other pages keep working.
 
 ## Edit while viewing
 
-When viewing a page in webkit (such as with `C-c n b`), pressing `E` opens that page in the lower window as an Emacs buffer. The top window displays it, and the bottom window edits it.
+While you view a page in webkit (for example, after `C-c n b`), press `E` to open the same page as an Emacs buffer in the lower window. You read in the top window and edit in the bottom one.
 
 | Key | | |
 |---|---|---|
 | `E` | `enghi-xwidget-edit-page` | Edit the displayed page in the lower window |
 
-Available keys **appear in the buffer header line**. They change depending on the current view: for a page, you see options like `E edit`; for the GTD list, options like `n next action` and `d done`.
+The header line shows the keys you can use. They change with the view: a page shows keys like `E edit`, and a GTD list shows keys like `n next action` and `d done`.
 
-Because actions in the GTD list are handled by the page itself, keys like `j` `k` `RET` `n` `w` `s` `l` `m` `d` `S` `f` `t` `x` `c` `/` pass straight through to the page (you can press them without entering `xwidget-webkit-edit-mode` via `e`). `e` itself is kept intact, as it is the native xwidget mode for passing keys to the page. `f` goes to the page only in the GTD list; on other screens it keeps its usual webkit meaning (forward). The keys are delivered as JavaScript `keydown` events, so this also works on macOS, where `xwidget-webkit-pass-command-event` does nothing.
+In the GTD lists, `j` and `k` move the page's cursor as before. The keys that move a task ask their questions in the minibuffer instead of the page's modal. Select a row with `j`/`k`, then press:
 
-The GTD top page (`/gtd`) has its own keys instead: `i` `n` `w` `s` `m` `p` open Inbox, Next Actions, Waiting For, Scheduled, Someday/Maybe and Projects, and `c` captures with `enghi-capture` in Emacs.
+| Key | Asks for | Result |
+|---|---|---|
+| `n` | Project (or `(none)`), and a context if contexts are on | Next action |
+| `l` | Project (required) | Later |
+| `w` | Who or what it waits for | Waiting For |
+| `s` | Date (`org-read-date`), repeat rule, optional last date | Scheduled |
+| `m` | — | Someday/Maybe |
+| `x` | Confirmation | Dropped |
+| `d` | — | Done (a recurring task gets its next instance) |
+| `S` | — | Skip this instance of a recurring task |
+| `t` | New title | Renamed |
+| `f` | Page title and tags | Filed as a wiki page, which opens in the lower window |
+| `RET` | — | Opens the task's detail page |
 
-When you save with `C-c C-c`, the server broadcasts the update to all connected clients, and any view displaying that page reloads automatically. You do not need to trigger a refresh from Emacs. Your scroll position is preserved.
+Each prompt defaults to the task's current value, and `C-g` cancels without changing anything. The change goes through the JSON API, and then the list reloads with the same row selected. For the repeat rule, pick one that fits the date (`+1w`, `weekly:fri`, `monthly:25`, …) or type any rule the server accepts.
 
-Updates are sent only when you save. In-progress typing is not sent.
+On every enghi screen, `c` and `/` run in Emacs. `c` adds an item to the Inbox from the minibuffer with `enghi-capture`, and reloads the page on GTD screens. `/` searches from Emacs, as you type if consult is installed, and opens the chosen result in this view.
+
+Other keys, such as `j` and `k`, go straight to the page.
+
+The GTD top page (`/gtd`) has its own keys: `i` `n` `w` `s` `m` `p` open Inbox, Next Actions, Waiting For, Scheduled, Someday/Maybe and Projects.
+
+When you save with `C-c C-c`, the server sends the update to every connected client. Any view showing that page reloads by itself and keeps its scroll position, so you don't need to refresh anything from Emacs.
+
+Updates go out only when you save, not while you type.
 
 ## Save conflicts
 
-If a page was updated through another path while you were editing, `ediff` opens to show the server version and your local version side by side. Your local edits remain in the buffer, so you can compare them and save again.
+If the page changed elsewhere while you were editing, `ediff` opens with the server version and your version side by side. Your edits stay in the buffer, so you can compare them and save again.
 
-If you try to rename a page to a title that already exists, it displays the conflicting page and prompts for a different title. The body text is preserved.
+If you rename a page to a title that's already taken, Emacs shows the conflicting page and asks for another title. It keeps the body as is.
 
 ## Browser integration
 
@@ -156,15 +175,15 @@ If you keep a browser open on another display, it can follow what you select in 
 C-c n o
 ```
 
-The server broadcasts navigation events to all connected tabs. Even if the server restarts, the browser automatically reconnects.
+The server sends navigation events to every connected tab. If the server restarts, the browser reconnects automatically.
 
-If you want to view pages inside Emacs, you can change the browse function.
+To view pages inside Emacs instead, change the browse function.
 
 ```elisp
 (setq enghi-browse-function #'enghi-browse-in-xwidget)  ; Default is #'browse-url
 ```
 
-`enghi-browse-in-xwidget` opens pages in xwidget webkit and leaves some padding around the view (with `xwidget-webkit-browse-url`, the edges of the page stick directly to the fringes and mode line). You can adjust the padding with `enghi-xwidget-padding`: an integer applies equally to all four sides, while `(horizontal . vertical)` sets left/right and top/bottom separately. Setting it to `0` expands to fill the entire buffer. Padding only applies to buffers opened by `enghi`.
+`enghi-browse-in-xwidget` opens pages in xwidget webkit with some padding around the view. With `xwidget-webkit-browse-url`, the page touches the fringes and the mode line. Set the padding with `enghi-xwidget-padding`: an integer pads all four sides equally, and `(horizontal . vertical)` sets left/right and top/bottom separately. `0` fills the whole buffer. The padding applies only to buffers that `enghi` opens.
 
 ## Configuration
 
@@ -176,7 +195,7 @@ If you want to view pages inside Emacs, you can change the browse function.
 | `enghi-xwidget-padding` | `(24 . 12)` | Padding for `enghi-browse-in-xwidget`, in `(horizontal . vertical)` pixels |
 | `enghi-consult-min-input` | `1` | Number of characters typed before search starts |
 
-There are no passwords or tokens to configure. The server only accepts connections from loopback.
+There are no passwords or tokens to set. The server accepts connections from loopback only.
 
 ## Development
 
@@ -184,7 +203,7 @@ There are no passwords or tokens to configure. The server only accepts connectio
 make compile    # Byte-compile (warnings treated as errors)
 ```
 
-Tests run against a live server. Start a test server on a different port.
+Tests run against a live server, so start a test server on another port first.
 
 ```sh
 cat > /tmp/enghi-test.toml <<'TOML'

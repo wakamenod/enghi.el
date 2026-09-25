@@ -145,6 +145,15 @@ meaningless."
                        (mapcar (lambda (c) (alist-get 'title (get-text-property 0 'enghi-result c)))
                                cands))))))
 
+  (ert-deftest enghi-test-consult-min-input-passed ()
+    "Pass our minimum to consult, whose own default (3) would hide 2-char queries."
+    (let (args (enghi-consult-min-input 1))
+      (cl-letf (((symbol-function 'consult--dynamic-collection)
+                 (lambda (&rest a) (setq args a) #'ignore))
+                ((symbol-function 'consult--read) (lambda (&rest _) nil)))
+        (enghi-consult-read-result)
+        (should (equal (plist-get (cdr args) :min-input) 1)))))
+
   (ert-deftest enghi-test-consult-short-input-skipped ()
     "Do not query the server on input that is too short."
     (let ((enghi-consult-min-input 3))
@@ -177,17 +186,29 @@ them."
 
 ;;;; Keys sent to the webkit page
 
+(defvar enghi-tests--row nil
+  "JSON the stubbed page returns for its selected row (nil for none).")
+
 (defmacro enghi-tests--with-xwidget-stubs (path &rest body)
   "Run BODY with webkit stubbed out, showing enghi PATH.
-Bind `scripts' to the JS sent and `forwarded' to whether it went forward."
+Bind `scripts' to the JS sent without a callback, `forwarded' to whether it
+went forward and `opened' to the URIs gone to. Scripts with a callback get
+`enghi-tests--row'. Timers with no delay run at once; the others are left
+out."
   (declare (indent 1))
-  `(let (scripts forwarded)
+  `(let (scripts forwarded opened)
      (cl-letf (((symbol-function 'xwidget-webkit-current-session) (lambda () 'session))
                ((symbol-function 'xwidget-webkit-execute-script)
-                (lambda (session script &optional _cb)
+                (lambda (session script &optional cb)
                   (should (eq session 'session))
-                  (push script scripts)))
+                  (if cb (funcall cb enghi-tests--row) (push script scripts))))
                ((symbol-function 'xwidget-webkit-forward) (lambda () (setq forwarded t)))
+               ((symbol-function 'xwidget-webkit-goto-uri)
+                (lambda (_session uri) (push uri opened)))
+               ((symbol-function 'run-at-time)
+                (lambda (time _repeat fn &rest args)
+                  (when (equal time 0) (apply fn args))
+                  nil))
                ((symbol-function 'enghi--xwidget-path) (lambda () ,path)))
        ,@body)))
 
@@ -227,10 +248,8 @@ Bind `scripts' to the JS sent and `forwarded' to whether it went forward."
 (ert-deftest enghi-test-xwidget-gtd-top ()
   "Ensure the GTD top page opens lists and captures from Emacs."
   (let ((enghi-server-url "http://127.0.0.1:7777/")
-        opened captured reloaded)
-    (cl-letf (((symbol-function 'xwidget-webkit-goto-uri)
-               (lambda (_session uri) (push uri opened)))
-              ((symbol-function 'enghi-capture)
+        captured reloaded)
+    (cl-letf (((symbol-function 'enghi-capture)
                (lambda (title) (interactive (list "Buy milk")) (setq captured title)))
               ((symbol-function 'xwidget-webkit-reload) (lambda () (setq reloaded t))))
       (enghi-tests--with-xwidget-stubs "/gtd"
@@ -244,7 +263,303 @@ Bind `scripts' to the JS sent and `forwarded' to whether it went forward."
         (should (equal captured "Buy milk"))
         (should reloaded)
         ;; The page's own keys do nothing here
-        (dolist (key '(?j ?k 13 ?d ?/))
+        (dolist (key '(?j ?k 13 ?d))
           (let ((last-command-event key)) (enghi-xwidget-key)))
         (should-not scripts)
         (should (= (length opened) 6))))))
+
+;;;; Acting on the selected task from Emacs
+
+(defun enghi-tests--row (&rest fields)
+  "Return row JSON for a task with FIELDS (a plist) over some defaults."
+  (let ((row (list :id "42" :state "inbox" :title "Write report"
+                   :project_id "" :project_title "" :context_id ""
+                   :waiting_for "" :scheduled_on "" :recurrence ""
+                   :recurrence_ends_on "" :index 2 :contexts :json-false)))
+    (while fields
+      (setq row (plist-put row (pop fields) (pop fields))))
+    (json-encode row)))
+
+(defmacro enghi-tests--with-task-action (row &rest body)
+  "Run BODY on the GTD Inbox with ROW selected and requests stubbed.
+Bind `requests' to the requests made, as (METHOD PATH PAYLOAD), oldest
+first. GETs answer with a few projects, contexts and tags."
+  (declare (indent 1))
+  `(let ((enghi-tests--row ,row)
+         (requests nil))
+     (cl-letf (((symbol-function 'enghi-request)
+                (lambda (method path &optional payload _params)
+                  (setq requests (append requests (list (list method path payload))))
+                  (pcase path
+                    ("/api/projects" '((projects ((id . 7) (title . "Garden"))
+                                                 ((id . 8) (title . "House")))))
+                    ("/api/contexts" '((contexts ((id . 3) (name . "@home"))
+                                                 ((id . 4) (name . "@old") (archived . t)))))
+                    ("/api/tags" '((tags ((name . "notes") (count . 1)))))
+                    ((pred (string-suffix-p "/file"))
+                     '((page (slug . "write-report") (title . "Write report"))))
+                    (_ nil)))))
+       (enghi-tests--with-xwidget-stubs "/gtd/inbox"
+         ,@body))))
+
+(defun enghi-tests--press (key)
+  "Press KEY (a character) in the stubbed view."
+  (let ((last-command-event key)) (enghi-xwidget-key)))
+
+(defun enghi-tests--writes (requests)
+  "Return the non-GET requests in REQUESTS."
+  (seq-remove (lambda (r) (equal (car r) "GET")) requests))
+
+(ert-deftest enghi-test-task-next ()
+  "`n' asks for a project and moves the task to Next."
+  (enghi-tests--with-task-action (enghi-tests--row)
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (prompt cands &rest _)
+                 (should (string-prefix-p "Project" prompt))
+                 (should (assoc "(none)" cands))
+                 "House")))
+      (enghi-tests--press ?n))
+    (should (equal (enghi-tests--writes requests)
+                   '(("PATCH" "/api/tasks/42" ((state . "next") (project_id . 8))))))
+    ;; The list reloads, then row 2 is selected again
+    (should (string-match-p "location.reload" (car scripts)))
+    (should (string-match-p "Math.min(2," (enghi--xwidget-select-row-script 2)))))
+
+(ert-deftest enghi-test-task-next-none-and-context ()
+  "`n' with \"(none)\" clears the project, and asks for a context if on."
+  (enghi-tests--with-task-action
+      (enghi-tests--row :project_id "7" :project_title "Garden" :contexts t)
+    (let (defaults)
+      (cl-letf (((symbol-function 'completing-read)
+                 (lambda (prompt cands _pred _req _init _hist default)
+                   (push default defaults)
+                   (if (string-prefix-p "Project" prompt)
+                       "(none)"
+                     (should-not (assoc "@old" cands))
+                     "@home"))))
+        (enghi-tests--press ?n))
+      ;; The current project is offered first
+      (should (equal (reverse defaults) '("Garden" "(none)"))))
+    (should (equal (enghi-tests--writes requests)
+                   '(("PATCH" "/api/tasks/42"
+                      ((state . "next") (clear_project . t) (context_id . 3))))))))
+
+(ert-deftest enghi-test-task-later ()
+  "`l' needs a project."
+  (enghi-tests--with-task-action (enghi-tests--row)
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (_prompt cands &rest _)
+                 (should-not (assoc "(none)" cands))
+                 "Garden")))
+      (enghi-tests--press ?l))
+    (should (equal (enghi-tests--writes requests)
+                   '(("PATCH" "/api/tasks/42" ((state . "later") (project_id . 7))))))))
+
+(ert-deftest enghi-test-task-waiting ()
+  "`w' asks who, and refuses an empty answer."
+  (enghi-tests--with-task-action (enghi-tests--row :waiting_for "Bob")
+    (cl-letf (((symbol-function 'read-string)
+               (lambda (_prompt initial &rest _)
+                 (should (equal initial "Bob"))
+                 " Alice ")))
+      (enghi-tests--press ?w))
+    (cl-letf (((symbol-function 'read-string) (lambda (&rest _) "")))
+      (enghi-tests--press ?w))
+    (should (equal (enghi-tests--writes requests)
+                   '(("PATCH" "/api/tasks/42" ((state . "waiting") (waiting_for . "Alice"))))))))
+
+(ert-deftest enghi-test-task-schedule ()
+  "`s' asks for a date, a repeat rule and an end."
+  ;; Loading org later would put the real `org-read-date' back over the stub
+  (require 'org)
+  (enghi-tests--with-task-action (enghi-tests--row :scheduled_on "2026-09-01")
+    (let ((dates '("2026-09-25" "2026-12-31")) presets)
+      (cl-letf (((symbol-function 'org-read-date)
+                 (lambda (&rest _) (pop dates)))
+                ((symbol-function 'completing-read)
+                 (lambda (_prompt cands &rest _)
+                   (setq presets (mapcar #'car cands))
+                   "weekly:fri"))
+                ((symbol-function 'y-or-n-p) (lambda (_) t)))
+        (enghi-tests--press ?s))
+      (should (member "Does not repeat" presets))
+      (should (member "monthly:25" presets))
+      (should (member "yearly:09-25" presets)))
+    ;; No repeat: no end asked, and both are cleared
+    (cl-letf (((symbol-function 'org-read-date) (lambda (&rest _) "2026-10-01"))
+              ((symbol-function 'completing-read) (lambda (&rest _) "Does not repeat"))
+              ((symbol-function 'y-or-n-p) (lambda (_) (error "Should not ask"))))
+      (enghi-tests--press ?s))
+    (should (equal (enghi-tests--writes requests)
+                   '(("PATCH" "/api/tasks/42"
+                      ((state . "scheduled") (scheduled_on . "2026-09-25")
+                       (recurrence . "weekly:fri") (recurrence_ends_on . "2026-12-31")))
+                     ("PATCH" "/api/tasks/42"
+                      ((state . "scheduled") (scheduled_on . "2026-10-01")
+                       (recurrence . "") (recurrence_ends_on . ""))))))))
+
+(ert-deftest enghi-test-task-drop ()
+  "`x' drops only after confirming."
+  (enghi-tests--with-task-action (enghi-tests--row)
+    (cl-letf (((symbol-function 'y-or-n-p) (lambda (_) nil)))
+      (enghi-tests--press ?x))
+    (should-not requests)
+    (should-not scripts)
+    ;; In the minibuffer, not a dialog box: the last input is an xwidget event
+    (cl-letf (((symbol-function 'y-or-n-p) (lambda (_) (not use-dialog-box))))
+      (let ((use-dialog-box t))
+        (enghi-tests--press ?x)))
+    (should (equal requests '(("PATCH" "/api/tasks/42" ((state . "dropped"))))))))
+
+(ert-deftest enghi-test-task-file ()
+  "`f' files the task as a page and opens the page."
+  (enghi-tests--with-task-action (enghi-tests--row)
+    (let (opened-slug)
+      (cl-letf (((symbol-function 'read-string) (lambda (_p initial &rest _) initial))
+                ((symbol-function 'completing-read-multiple)
+                 (lambda (_prompt cands &rest _)
+                   (should (member "notes" cands))
+                   '("notes" "new")))
+                ((symbol-function 'enghi-open) (lambda (slug) (setq opened-slug slug))))
+        (enghi-tests--press ?f))
+      (should (equal opened-slug "write-report")))
+    (should (equal (enghi-tests--writes requests)
+                   '(("POST" "/api/tasks/42/file"
+                      ((title . "Write report") (body . "") (tags . ["notes" "new"]))))))))
+
+(ert-deftest enghi-test-task-rename-someday-done ()
+  "`t' renames, `m' moves to Someday and `d' completes."
+  (enghi-tests--with-task-action (enghi-tests--row)
+    (cl-letf (((symbol-function 'read-string) (lambda (&rest _) "Write the report")))
+      (enghi-tests--press ?t))
+    (enghi-tests--press ?m)
+    (enghi-tests--press ?d)
+    (should (equal (mapcar (lambda (r) (list (nth 0 r) (nth 1 r))) requests)
+                   '(("PATCH" "/api/tasks/42") ("PATCH" "/api/tasks/42")
+                     ("POST" "/api/tasks/42/complete"))))
+    (should (equal (nth 2 (nth 0 requests)) '((title . "Write the report"))))
+    (should (equal (nth 2 (nth 1 requests)) '((state . "someday"))))
+    ;; `{}', not `null'
+    (should (equal (json-encode (nth 2 (nth 2 requests))) "{}"))))
+
+(ert-deftest enghi-test-task-skip ()
+  "`S' skips only a recurring task."
+  (enghi-tests--with-task-action (enghi-tests--row)
+    (enghi-tests--press ?S)
+    (should-not requests))
+  (enghi-tests--with-task-action (enghi-tests--row :recurrence "+1w")
+    (enghi-tests--press ?S)
+    (should (equal requests '(("POST" "/api/tasks/42/complete" ((skip . t))))))))
+
+(ert-deftest enghi-test-task-details ()
+  "RET opens the task's detail page without reloading."
+  (let ((enghi-server-url "http://127.0.0.1:7777"))
+    (enghi-tests--with-task-action (enghi-tests--row)
+      (enghi-tests--press 13)
+      (should (equal opened '("http://127.0.0.1:7777/gtd/clarify/42")))
+      (should-not scripts))))
+
+(ert-deftest enghi-test-task-cancel ()
+  "C-g in a prompt makes no request."
+  (enghi-tests--with-task-action (enghi-tests--row)
+    (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) (signal 'quit nil))))
+      (enghi-tests--press ?n))
+    (should-not (enghi-tests--writes requests))
+    (should-not scripts)))
+
+(ert-deftest enghi-test-task-no-selection ()
+  "Without a selected task row, the key goes to the page."
+  (enghi-tests--with-task-action nil
+    (dolist (key '(?n 13 ?f))
+      (enghi-tests--press key))
+    (should-not requests)
+    (should-not opened)
+    (should (equal (length scripts) 3))
+    (should (string-match-p "key: \"n\"" (nth 2 scripts)))
+    (should (string-match-p "key: \"Enter\"" (nth 1 scripts)))
+    (should (string-match-p "key: \"f\"" (nth 0 scripts))))
+  ;; j/k are still the page's
+  (enghi-tests--with-task-action (enghi-tests--row)
+    (dolist (key '(?j ?k))
+      (enghi-tests--press key))
+    (should-not requests)
+    (should (equal (length scripts) 2))))
+
+(ert-deftest enghi-test-task-next-live ()
+  "`n' moves a captured task to Next in a project on the server."
+  (let* ((task (enghi-capture (enghi-tests--unique "Task to move")))
+         (project (enghi-request "POST" "/api/projects"
+                                 `((title . ,(enghi-tests--unique "Move project")))))
+         (enghi-tests--row
+          (enghi-tests--row :id (number-to-string (alist-get 'id task))
+                            :title (alist-get 'title task))))
+    (enghi-tests--with-xwidget-stubs "/gtd/inbox"
+      (cl-letf (((symbol-function 'completing-read)
+                 (lambda (_prompt cands &rest _)
+                   (should (assoc (alist-get 'title project) cands))
+                   (alist-get 'title project))))
+        (enghi-tests--press ?n)))
+    (let ((after (alist-get 'task (enghi-request "GET" (format "/api/tasks/%d" (alist-get 'id task))))))
+      (should (equal (alist-get 'state after) "next"))
+      (should (equal (alist-get 'project_id after) (alist-get 'id project))))))
+
+(ert-deftest enghi-test-xwidget-callbacks-held ()
+  "Script callbacks are held until WebKit calls them (macOS does not)."
+  (let ((enghi--xwidget-callbacks nil) pending got)
+    (cl-letf (((symbol-function 'xwidget-webkit-execute-script)
+               (lambda (_session _script cb) (push cb pending))))
+      (enghi--xwidget-execute-script 'session "1" (lambda (v) (push v got)))
+      (should (= (length enghi--xwidget-callbacks) 1))
+      (funcall (car pending) "answer")
+      (should (equal got '("answer")))
+      (should-not enghi--xwidget-callbacks)
+      ;; Unanswered ones do not pile up
+      (dotimes (_ 40) (enghi--xwidget-execute-script 'session "1" #'ignore))
+      (should (= (length enghi--xwidget-callbacks) 16)))))
+
+;;;; Capture and search from any enghi screen
+
+(ert-deftest enghi-test-xwidget-capture-everywhere ()
+  "`c' captures from Emacs on every enghi screen, reloading GTD screens."
+  (dolist (case '(("/gtd/inbox" . t) ("/gtd/project/3" . t) ("/wiki/foo" . nil) ("/" . nil)))
+    (let (captured reloaded)
+      (cl-letf (((symbol-function 'enghi-capture)
+                 (lambda (title) (interactive (list "Buy milk")) (setq captured title)))
+                ((symbol-function 'xwidget-webkit-reload) (lambda () (setq reloaded t))))
+        (enghi-tests--with-xwidget-stubs (car case)
+          (enghi-tests--press ?c)
+          (should (equal captured "Buy milk"))
+          (should (eq reloaded (cdr case)))
+          (should-not scripts)))))
+  ;; Another site's page keeps its own key
+  (let (captured)
+    (cl-letf (((symbol-function 'enghi-capture) (lambda (&rest _) (interactive) (setq captured t))))
+      (enghi-tests--with-xwidget-stubs nil
+        (enghi-tests--press ?c)
+        (should-not captured)
+        (should (string-match-p "key: \"c\"" (car scripts)))))))
+
+(ert-deftest enghi-test-xwidget-search-everywhere ()
+  "`/' searches from Emacs and shows the chosen result in this view."
+  (let ((enghi-server-url "http://127.0.0.1:7777"))
+    (dolist (path '("/gtd" "/gtd/inbox" "/wiki/foo" "/"))
+      (cl-letf (((symbol-function 'enghi-read-search-result)
+                 (lambda (&rest _) '((kind . "page") (slug . "design-notes")))))
+        (enghi-tests--with-xwidget-stubs path
+          (enghi-tests--press ?/)
+          (should (equal opened '("http://127.0.0.1:7777/wiki/design-notes")))
+          (should-not scripts))))
+    ;; Nothing chosen: nothing happens
+    (cl-letf (((symbol-function 'enghi-read-search-result) (lambda (&rest _) nil)))
+      (enghi-tests--with-xwidget-stubs "/wiki/foo"
+        (enghi-tests--press ?/)
+        (should-not opened)
+        (should-not scripts)))))
+
+(ert-deftest enghi-test-result-path ()
+  "Each kind of search result maps to the screen that shows it."
+  (should (equal (enghi--result-path '((kind . "page") (slug . "a-b"))) "/wiki/a-b"))
+  (should (equal (enghi--result-path '((kind . "project") (id . 3))) "/gtd/project/3"))
+  (should (equal (enghi--result-path '((kind . "task") (id . 4))) "/gtd/clarify/4"))
+  (should (equal (enghi--result-path '((kind . "area") (id . 5))) "/gtd/area/5"))
+  (should-not (enghi--result-path '((kind . "other")))))

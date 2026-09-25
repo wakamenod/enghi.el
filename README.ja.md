@@ -2,14 +2,13 @@
 
 *[English](README.md) · 日本語*
 
-ローカル専用の Wiki + GTD サーバ [enghi](https://github.com/wakamenod/enghi) の
-Emacs クライアント。
+ローカル専用の Wiki + GTD サーバ [enghi](https://github.com/wakamenod/enghi) を Emacs から使うためのクライアントです。
 
-- Emacs バッファでページを開いて編集、`C-c C-c` で保存
-- キー入力ごとにサーバへ問い合わせるページ横断検索
-- どこからでも GTD の Inbox へ1行送信
-- Emacs 内の WebKit で開いたダッシュボードから GTD タスクを管理
-- 開いているブラウザに Emacs で選択した項目を追従表示
+- ページを Emacs バッファで開いて編集し、`C-c C-c` で保存する
+- 入力のたびにサーバへ問い合わせて、全ページを検索する
+- どこからでも GTD の Inbox へ1行で送る
+- Emacs 内の WebKit で開いたダッシュボードから GTD のタスクを管理する
+- Emacs で選んだ項目を、開いているブラウザにも表示する
 
 ## 動作要件
 
@@ -20,8 +19,7 @@ Emacs クライアント。
 | `markdown-mode` | 任意 | ページバッファで使用 |
 | `consult` | 任意 | キー入力ごとの検索で使用 |
 
-`markdown-mode` と `consult` は任意。未導入なら `fundamental-mode` と
-`completing-read` による検索にフォールバックする。
+`markdown-mode` と `consult` はなくても動きます。ない場合は、それぞれ `fundamental-mode` と `completing-read` による検索を使います。
 
 ## セットアップ
 
@@ -33,27 +31,46 @@ make build
 ./bin/enghi install-agent -load   # launchd で常時起動
 ```
 
-常時起動せず試すだけなら `./bin/enghi serve` でも動く。
-デフォルトでは `http://127.0.0.1:7777` で動作する。
+常時起動せずに試すだけなら、`./bin/enghi serve` でもかまいません。
+デフォルトでは `http://127.0.0.1:7777` で待ち受けます。
 
 ```sh
 curl -s http://127.0.0.1:7777/api/status
 # {"db":"...","event_clients":0,"export_dir":"...","ok":true}
 ```
 
-### 2. パッケージの読み込み
+### 2. パッケージのインストール
 
-```elisp
-(add-to-list 'load-path "~/Projects/SideProjects/enghi.el")
-(require 'enghi)
-(enghi-setup)          ; C-c n にキーマップを設定
-```
-
-`use-package` の場合:
+`use-package` で GitHub からインストールします。`:vc` キーワードは Emacs 30 以降で使えます。
 
 ```elisp
 (use-package enghi
-  :load-path "~/Projects/SideProjects/enghi.el"
+  :vc (:url "https://github.com/wakamenod/enghi.el" :rev :newest)
+  :bind-keymap ("C-c n" . enghi-command-map)
+  :custom
+  (enghi-server-url "http://127.0.0.1:7777"))
+```
+
+初めて `C-c n` を押したときにパッケージが読み込まれます。
+
+Emacs 29 では、先に `M-x package-vc-install RET https://github.com/wakamenod/enghi.el RET` でインストールしておきます。
+
+```elisp
+(use-package enghi
+  :bind-keymap ("C-c n" . enghi-command-map)
+  :custom
+  (enghi-server-url "http://127.0.0.1:7777"))
+```
+
+Emacs 28 の場合、リポジトリを clone して、そこから読み込みます:
+
+```sh
+git clone https://github.com/wakamenod/enghi.el ~/.emacs.d/site-lisp/enghi.el
+```
+
+```elisp
+(use-package enghi
+  :load-path "~/.emacs.d/site-lisp/enghi.el"
   :commands (enghi-find-page enghi-capture enghi-browse-dashboard enghi-search-command)
   :bind-keymap ("C-c n" . enghi-command-map)
   :custom
@@ -62,40 +79,16 @@ curl -s http://127.0.0.1:7777/api/status
   (autoload 'enghi-consult-search "enghi-consult" nil t))
 ```
 
-`leaf` の場合。`:bind-keymap` は展開時にキーマップを評価するため未読み込みだと失敗する。
-キーマップの autoload を追加しておく:
-
-```elisp
-(leaf enghi
-  :load-path "~/Projects/SideProjects/enghi.el"
-  :commands (enghi-find-page enghi-new-page enghi-capture enghi-search-command
-             enghi-open-in-browser enghi-focus-page enghi-browse-dashboard enghi-status)
-  :init
-  (autoload 'enghi-command-map "enghi" nil nil 'keymap)
-  (autoload 'enghi-consult-search "enghi-consult" nil t)
-  :bind (("C-c n" . enghi-command-map))
-  :custom ((enghi-server-url . "http://127.0.0.1:7777")))
-```
-
-`straight.el` の場合:
-
-```elisp
-(straight-use-package
- '(enghi :type built-in :local-repo "~/Projects/SideProjects/enghi.el" :files ("*.el")))
-```
+更新するときは、そのディレクトリで `git pull` します。
 
 ### 3. 動作確認
 
-`M-x enghi-status` でサーバのステータスが返ってくれば接続完了。
-ポート番号を変えている場合は `enghi-server-url` を合わせて変更する。
-
-未接続の状態でブラウザを開こうとすると、ブラウザへリクエストを渡す前に Emacs が
-エラーを出す (xwidget にそのまま渡すと原因不明の WebKit エラー画面になってしまうため)。
+`M-x enghi-status` でサーバのステータスが返れば、接続できています。
+ポート番号を変えた場合は、`enghi-server-url` もそれに合わせてください。
 
 ### 4. 最初のページを作成
 
-`C-c n n` を押してタイトルを入力するとページバッファが開く。本文を書いて
-`C-c C-c` で保存する。
+`C-c n n` を押してタイトルを入力すると、ページバッファが開きます。本文を書いたら `C-c C-c` で保存します。
 
 ## 使い方
 
@@ -113,8 +106,7 @@ curl -s http://127.0.0.1:7777/api/status
 
 ### ページバッファ
 
-`enghi-page-mode` は `markdown-mode` の上で動作する。バッファの内容は素の Markdown
-である。
+`enghi-page-mode` は `markdown-mode` の上で動きます。バッファの中身はそのままの Markdown です。
 
 | キー | |
 |---|---|
@@ -125,72 +117,71 @@ curl -s http://127.0.0.1:7777/api/status
 | `C-c C-o` | ブラウザで開く |
 | `C-c C-k` | サーバの内容に戻す |
 
-`[[non-existent page]]` のように、まだ存在しないページにもリンクできる。未解決リンク
-として保持され、その名前でページを作成すると自動でつながる。
+`[[non-existent page]]` のように、まだないページにもリンクできます。リンクは未解決のまま残り、その名前のページを作ると自動でつながります。
 
-タイトルを変更しても旧タイトルはエイリアスとして残る。他ページにある `[[old title]]`
-形式のリンクもそのまま機能する。
+タイトルを変えても、旧タイトルはエイリアスとして残ります。ほかのページにある `[[old title]]` 形式のリンクもそのまま使えます。
 
 ## 閲覧しながら編集
 
-WebKit でページを閲覧中 (`C-c n b` など) に `E` を押すと、下側のウィンドウにその
-ページが Emacs バッファとして開く。上側ウィンドウで閲覧し、下側ウィンドウで編集する。
+WebKit でページを見ているとき (`C-c n b` で開いたときなど) に `E` を押すと、同じページが下のウィンドウに Emacs バッファとして開きます。上のウィンドウで見ながら、下のウィンドウで編集できます。
 
 | キー | | |
 |---|---|---|
 | `E` | `enghi-xwidget-edit-page` | 表示中のページを下側ウィンドウで編集 |
 
-利用可能なキーは**バッファのヘッダ行に表示される**。表示内容に応じて変化し、ページでは
-`E edit`、GTD リストでは `n next action` や `d done` などが表示される。
+使えるキーはバッファのヘッダ行に表示されます。表示は画面によって変わり、ページでは `E edit`、GTD リストでは `n next action` や `d done` などが出ます。
 
-GTD リストの操作はページ側で処理されるため、`j` `k` `RET` `n` `w` `s` `l` `m` `d`
-`S` `f` `t` `x` `c` `/` などのキーはそのままページへ抜ける (`e` で
-`xwidget-webkit-edit-mode` に入らずにそのまま押せる)。xwidget 本来のキー送信モード
-である `e` もそのまま残してある。
-`f` がページへ送られるのは GTD リストのときだけで、それ以外の画面では webkit 本来の
-「進む」として働く。キーは JavaScript の `keydown` イベントとして送るので、
-`xwidget-webkit-pass-command-event` が何もしない macOS でも動く。
+GTD リストでは、`j` `k` でこれまでどおりページのカーソルを動かします。タスクを移すキーを押すと、ページのモーダルではなくミニバッファで質問されます。`j`/`k` で行を選んでから、次のキーを押してください。
 
-GTD トップ (`/gtd`) だけはキーが別で、`i` `n` `w` `s` `m` `p` でそれぞれ Inbox、
-Next Actions、Waiting For、Scheduled、Someday/Maybe、Projects を開き、`c` は Emacs
-側の `enghi-capture` でキャプチャする。
+| キー | 尋ねること | 結果 |
+|---|---|---|
+| `n` | プロジェクト (`(none)` も可)、コンテキスト機能が有効ならコンテキスト | Next Action |
+| `l` | プロジェクト (必須) | Later |
+| `w` | 誰・何を待っているか | Waiting For |
+| `s` | 日付 (`org-read-date`)、繰り返しルール、任意で最終日 | Scheduled |
+| `m` | — | Someday/Maybe |
+| `x` | 確認 | 破棄 (Dropped) |
+| `d` | — | 完了 (繰り返しタスクは次の回が作られる) |
+| `S` | — | 繰り返しタスクの今回をスキップ |
+| `t` | 新しいタイトル | 名前を変更 |
+| `f` | ページのタイトルとタグ | Wiki ページとして保存し、下側ウィンドウで開く |
+| `RET` | — | タスクの詳細ページを開く |
 
-`C-c C-c` で保存すると、サーバが接続中の全クライアントへ更新を配信し、該当ページを
-表示しているビューが自動でリロードされる。Emacs から再読み込みする必要はない。
-スクロール位置も保持される。
+どの質問も既定値はタスクの今の値で、`C-g` を押せば何も変えずに取り消せます。繰り返しルールは、日付に合った候補 (`+1w`、`weekly:fri`、`monthly:25` など) から選ぶか、サーバが受け付ける書式で直接入力します。
 
-更新が送信されるのは保存時のみ。入力中のテキストは送信されない。
+`c` と `/` は、enghi のどの画面でも Emacs 側で処理します。`c` は `enghi-capture` でミニバッファから Inbox へ追加し、GTD の画面ならページを再読み込みします。`/` は Emacs で検索し、選んだ結果をこのビューで開きます。
+
+`j` や `k` など、ほかのキーはそのままページへ送られます。
+
+GTD トップ (`/gtd`) では専用のキーを使います。`i` `n` `w` `s` `m` `p` で、それぞれ Inbox、Next Actions、Waiting For、Scheduled、Someday/Maybe、Projects を開きます。
+
+`C-c C-c` で保存すると、サーバが接続中のすべてのクライアントへ更新を配信します。そのページを表示しているビューは自動で再読み込みされ、スクロール位置も保たれます。Emacs 側で再読み込みする必要はありません。
+
+更新を送るのは保存したときだけで、入力中の内容は送りません。
 
 ## 保存の競合
 
-編集中に別経路でページが更新された場合、`ediff` が起動してサーバ版とローカル版を
-並べて表示する。バッファのローカル編集内容は残るため、差分を確認して再保存できる。
+編集中に別の経路でページが更新されていた場合は、`ediff` が起動してサーバ版と手元の版を並べて表示します。手元の編集内容はバッファに残るので、差分を確認してから保存し直せます。
 
-すでに存在するタイトルへ変更しようとすると、競合するページを表示して別タイトルの入力を
-促す。本文は保持される。
+すでにあるタイトルに変えようとすると、競合するページを表示して別のタイトルを聞いてきます。本文はそのまま残ります。
 
 ## ブラウザ連携
 
-別ディスプレイでブラウザを開いておけば、Emacs で選択した項目を追従表示できる。
+別のディスプレイでブラウザを開いておけば、Emacs で選んだ項目をブラウザにも表示できます。
 
 ```
 C-c n o
 ```
 
-サーバが接続中の全タブへ画面遷移イベントを配信する。サーバが再起動しても、
-ブラウザは自動で再接続する。
+サーバは接続中のすべてのタブへ画面遷移のイベントを配信します。サーバが再起動しても、ブラウザは自動で再接続します。
 
-Emacs 内でページを閲覧したい場合は、閲覧関数を変更できる。
+Emacs の中でページを見たい場合は、閲覧用の関数を変更します。
 
 ```elisp
 (setq enghi-browse-function #'enghi-browse-in-xwidget)  ; デフォルトは #'browse-url
 ```
 
-`enghi-browse-in-xwidget` は xwidget webkit でページを開き、ビューの周囲に適度な余白
-を設ける (`xwidget-webkit-browse-url` だとページの端がフリンジやモードラインに張り付
-いてしまう)。余白は `enghi-xwidget-padding` で調整できる。整数なら四辺均等、
-`(horizontal . vertical)` なら左右と上下を個別に指定できる。`0` にするとバッファ
-全体へ広がる。余白が適用されるのは `enghi` が開いたバッファのみである。
+`enghi-browse-in-xwidget` は xwidget webkit でページを開き、ビューの周りに少し余白をとります。`xwidget-webkit-browse-url` で開くと、ページの端がフリンジやモードラインに張り付いてしまいます。余白は `enghi-xwidget-padding` で調整できます。整数なら四辺とも同じ幅に、`(horizontal . vertical)` なら左右と上下を別々に指定できます。`0` にするとバッファ全体に広がります。余白がつくのは `enghi` が開いたバッファだけです。
 
 ## 設定
 
@@ -202,7 +193,7 @@ Emacs 内でページを閲覧したい場合は、閲覧関数を変更でき�
 | `enghi-xwidget-padding` | `(24 . 12)` | `enghi-browse-in-xwidget` の余白 (`(horizontal . vertical)` ピクセル) |
 | `enghi-consult-min-input` | `1` | 検索開始に必要な入力文字数 |
 
-パスワードやトークンの設定は不要。サーバはループバックからの接続のみを受け付ける。
+パスワードやトークンの設定は不要です。サーバはループバックからの接続だけを受け付けます。
 
 ## 開発
 
@@ -210,7 +201,7 @@ Emacs 内でページを閲覧したい場合は、閲覧関数を変更でき�
 make compile    # バイトコンパイル (警告はエラー扱い)
 ```
 
-テストは実サーバに対して実行する。別ポートでテスト用サーバを起動しておく。
+テストは実際のサーバに対して実行します。先に、別のポートでテスト用サーバを起動しておいてください。
 
 ```sh
 cat > /tmp/enghi-test.toml <<'TOML'

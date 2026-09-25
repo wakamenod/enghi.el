@@ -35,7 +35,7 @@
 
 ;; Defined in another file. Declared here only to avoid circular requires.
 (declare-function markdown-mode "markdown-mode" ())
-(declare-function enghi-consult-search "enghi-consult" ())
+(declare-function enghi-consult-read-result "enghi-consult" (&optional prompt initial))
 
 (defgroup enghi nil
   "Client for local Wiki + GTD (enghi)."
@@ -236,6 +236,9 @@ buffer."
 (declare-function xwidget-webkit-forward "xwidget" ())
 (declare-function xwidget-webkit-goto-uri "xwidget" (xwidget uri))
 (declare-function xwidget-webkit-reload "xwidget" ())
+(declare-function org-read-date "org"
+                  (&optional with-time to-time from-string prompt
+                             default-time default-input inactive))
 
 (defun enghi--xwidget-padding (axis)
   "Return the padding for AXIS from `enghi-xwidget-padding'.
@@ -257,8 +260,8 @@ is called with the target buffer current during size adjustment, so checking
 (defvar enghi-xwidget-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "E") #'enghi-xwidget-edit-page)
-    ;; GTD list operations are handled by page-side JS. By default, Emacs
-    ;; consumes keys in xwidget, so pass only these keys through to the page.
+    ;; Keys for the GTD screens. By default, Emacs consumes keys in xwidget,
+    ;; so these are either handled in Emacs or passed through to the page.
     ;; (Allows pressing them without entering `xwidget-webkit-edit-mode' with
     ;; `e')
     ;; `enghi-xwidget-key' decides per screen what each one does.
@@ -315,12 +318,15 @@ view."
   (format "document.dispatchEvent(new KeyboardEvent('keydown', {key: %s, bubbles: true}));"
           (json-encode-string key)))
 
+(defun enghi--xwidget-send-key-name (session key)
+  "Send KEY (a KeyboardEvent `key' value) to the page in SESSION."
+  (xwidget-webkit-execute-script session (enghi--xwidget-key-script key)))
+
 (defun enghi-xwidget-send-key ()
   "Send the key used to invoke this command to the page as a keydown."
   (interactive)
-  (xwidget-webkit-execute-script
-   (xwidget-webkit-current-session)
-   (enghi--xwidget-key-script (enghi--xwidget-key-name last-command-event))))
+  (enghi--xwidget-send-key-name (xwidget-webkit-current-session)
+                                (enghi--xwidget-key-name last-command-event)))
 
 (defconst enghi--xwidget-gtd-lists
   '(("i" . "/gtd/inbox") ("n" . "/gtd/next") ("w" . "/gtd/waiting")
@@ -331,52 +337,427 @@ view."
   "Return non-nil if PATH is the GTD top page."
   (member path '("/gtd" "/gtd/")))
 
+;;;; Acting on the selected task
+;;
+;; The GTD lists have a web modal for moving a task, but inside Emacs the
+;; minibuffer is the better place to answer it. So the destination keys read
+;; the task under the page's cursor (`li.cur', see `moveCursor' in
+;; `web/static/app.js'), ask in the minibuffer, write through the JSON API and
+;; reload the list with the same row selected. Without a task row, such as in
+;; the Projects list, the key goes to the page as before.
+
+(defconst enghi--xwidget-task-actions
+  '(("n" . enghi--task-next) ("l" . enghi--task-later)
+    ("w" . enghi--task-waiting) ("s" . enghi--task-schedule)
+    ("x" . enghi--task-drop) ("f" . enghi--task-file)
+    ("t" . enghi--task-rename) ("m" . enghi--task-someday)
+    ("d" . enghi--task-done) ("S" . enghi--task-skip)
+    ("Enter" . enghi--task-details))
+  "Keys acting on the selected task and their functions.
+Each function takes the task (see `enghi--xwidget-selected-task-script') and
+returns a message after changing it, or nil when the list needs no reload.")
+
+(defconst enghi--xwidget-selected-task-script
+  "(function () {
+  var li = document.querySelector('ul.rows > li.cur');
+  if (!li || !li.dataset.taskId) return '';
+  var d = li.dataset;
+  var rows = Array.prototype.slice.call(document.querySelectorAll('ul.rows > li'));
+  return JSON.stringify({
+    id: d.taskId, state: d.state || '', title: d.title || '',
+    project_id: d.projectId || '', project_title: d.projectTitle || '',
+    context_id: d.contextId || '', waiting_for: d.waitingFor || '',
+    scheduled_on: d.scheduledOn || '', recurrence: d.recurrence || '',
+    recurrence_ends_on: d.recurrenceEndsOn || '',
+    index: rows.indexOf(li), contexts: document.body.dataset.contexts === 'on'
+  });
+})()"
+  "JS returning the task under the cursor as JSON, or \"\" if there is none.
+The fields come from the row's data attributes (`web/templates/task_row.html').")
+
+(defvar enghi--xwidget-callbacks nil
+  "Script callbacks that WebKit has not called yet.
+On macOS, Emacs does not protect the callback given to
+`xwidget-webkit-execute-script' from GC (the GTK build does). If GC runs
+before WebKit answers, the callback is freed: the answer is dropped, or Emacs
+crashes printing it in `xwidget-event-handler'. Holding them here keeps them
+alive.")
+
+(defun enghi--xwidget-execute-script (session script callback)
+  "Run SCRIPT in SESSION and call CALLBACK with its value, kept safe from GC."
+  (let (held)
+    (setq held (lambda (value)
+                 (setq enghi--xwidget-callbacks (delq held enghi--xwidget-callbacks))
+                 (funcall callback value)))
+    ;; A script on a page that is going away may never answer. Do not hold on
+    ;; to those for ever.
+    (setq enghi--xwidget-callbacks (seq-take (cons held enghi--xwidget-callbacks) 16))
+    (xwidget-webkit-execute-script session script held)))
+
+(defun enghi--xwidget-task-action (key)
+  "Run the action for KEY on the selected task, or send KEY to the page."
+  (let ((session (xwidget-webkit-current-session))
+        (buffer (current-buffer)))
+    (enghi--xwidget-execute-script
+     session enghi--xwidget-selected-task-script
+     (lambda (json)
+       ;; This runs inside the xwidget event handler. Leave it before opening
+       ;; the minibuffer.
+       (run-at-time 0 nil #'enghi--xwidget-run-task-action
+                    session buffer key
+                    (and (stringp json) (enghi--parse-json json)))))))
+
+(defun enghi--xwidget-run-task-action (session buffer key task)
+  "Run the action for KEY on TASK, shown in SESSION in BUFFER.
+With no TASK, send KEY to the page instead."
+  (if (null task)
+      (enghi--xwidget-send-key-name session key)
+    (condition-case err
+        (when-let* ((msg (with-current-buffer (if (buffer-live-p buffer)
+                                                  buffer
+                                                (current-buffer))
+                           ;; The last input was the script's xwidget event, a
+                           ;; cons, so `y-or-n-p' would take it for a mouse
+                           ;; click and open a dialog box
+                           (let ((use-dialog-box nil))
+                             (funcall (cdr (assoc key enghi--xwidget-task-actions))
+                                      task)))))
+          (enghi--xwidget-reload-keeping-row session (alist-get 'index task))
+          (message "%s" msg))
+      (quit (message "Cancelled"))
+      ((user-error enghi-error) (message "%s" (error-message-string err))))))
+
+(defun enghi--xwidget-select-row-script (index)
+  "Return JS that selects row INDEX once, when the reloaded page is ready.
+It does nothing while the old page is still there, or once it has run."
+  (format "(function () {
+  if (window.__enghiOld || window.__enghiRestored || document.readyState !== 'complete') return;
+  window.__enghiRestored = true;
+  var list = document.querySelectorAll('ul.rows > li');
+  if (!list.length) return;
+  var i = Math.min(%d, list.length - 1);
+  for (var j = 0; j < list.length; j++) list[j].classList.remove('cur');
+  list[i].classList.add('cur');
+  list[i].scrollIntoView({block: 'nearest'});
+})()" index))
+
+(defun enghi--xwidget-reload-keeping-row (session index)
+  "Reload the page in SESSION and select row INDEX again.
+The list does not follow task changes made through the API, so reload it
+here. The cursor is only a class on the row, so setting it from outside is
+enough.
+
+The polling scripts take no callback: a script sent to the page being
+unloaded may never answer (see `enghi--xwidget-callbacks'). Instead, the
+script itself makes sure it runs once, on the new page."
+  (xwidget-webkit-execute-script
+   session "window.__enghiOld = true; location.reload();")
+  (when index
+    (let ((tries 0) timer)
+      (setq timer
+            (run-at-time
+             0.1 0.1
+             (lambda ()
+               (setq tries (1+ tries))
+               (if (> tries 30)
+                   (cancel-timer timer)
+                 (condition-case nil
+                     (xwidget-webkit-execute-script
+                      session (enghi--xwidget-select-row-script index))
+                   ;; The view is gone
+                   (error (cancel-timer timer))))))))))
+
+;;;;; Reading answers
+
+(defconst enghi--none "(none)"
+  "Candidate meaning no project or no context.")
+
+(defun enghi--task-field (task key)
+  "Return field KEY of TASK, or nil if it is empty."
+  (let ((v (alist-get key task)))
+    (unless (or (null v) (equal v "")) v)))
+
+(defun enghi--task-number (task key)
+  "Return field KEY of TASK (a number in a string) as a number, or nil."
+  (when-let* ((v (enghi--task-field task key)))
+    (string-to-number v)))
+
+(defun enghi--read-choice (prompt cands current allow-none)
+  "Read one of CANDS, an alist of (NAME . ID), with PROMPT.
+CURRENT is the ID to offer as the default. With ALLOW-NONE, also offer
+`enghi--none'. Return the chosen (NAME . ID), or nil for none."
+  (let* ((cands (if allow-none (append cands (list (list enghi--none))) cands))
+         (default (or (car (rassoc current cands)) (and allow-none enghi--none)))
+         (choice (completing-read prompt cands nil t nil nil default))
+         (cell (assoc choice cands)))
+    (and cell (cdr cell) cell)))
+
+(defun enghi--read-project (task allow-none)
+  "Read an active project for TASK. With ALLOW-NONE, it may be none."
+  (let* ((cands (mapcar (lambda (p) (cons (alist-get 'title p) (alist-get 'id p)))
+                        (alist-get 'projects
+                                   (enghi-request "GET" "/api/projects" nil
+                                                  '((status . "active"))))))
+         (current (enghi--task-number task 'project_id)))
+    ;; The task may belong to a project that is no longer active
+    (when (and current (not (rassoc current cands)))
+      (push (cons (alist-get 'project_title task) current) cands))
+    (unless (or cands allow-none)
+      (user-error "No active projects"))
+    (or (enghi--read-choice (if allow-none "Project: " "Project (required): ")
+                            cands current allow-none)
+        (unless allow-none (user-error "A project is required")))))
+
+(defun enghi--read-context (task)
+  "Read a context for TASK, or nil for none."
+  (enghi--read-choice
+   "Context: "
+   (delq nil (mapcar (lambda (c)
+                       (unless (alist-get 'archived c)
+                         (cons (alist-get 'name c) (alist-get 'id c))))
+                     (alist-get 'contexts (enghi-request "GET" "/api/contexts"))))
+   (enghi--task-number task 'context_id) t))
+
+(defun enghi--date-time (date)
+  "Return DATE (YYYY-MM-DD) as a Lisp time, or nil if it is not one."
+  (when (and date (string-match "\\`\\([0-9]\\{4\\}\\)-\\([0-9]\\{2\\}\\)-\\([0-9]\\{2\\}\\)\\'" date))
+    (encode-time (list 0 0 0
+                       (string-to-number (match-string 3 date))
+                       (string-to-number (match-string 2 date))
+                       (string-to-number (match-string 1 date))
+                       nil -1 nil))))
+
+(defun enghi--read-date (prompt current)
+  "Read a date with PROMPT, defaulting to CURRENT (YYYY-MM-DD) or today."
+  (require 'org)
+  (org-read-date nil nil nil prompt (enghi--date-time current)))
+
+(defconst enghi--no-repeat "Does not repeat"
+  "Candidate meaning a task that does not repeat.")
+
+(defun enghi--repeat-presets (date)
+  "Return repeat rules that fit DATE, as an alist of (RULE . DESCRIPTION).
+The syntax is ParseRecurrence's (`internal/gtd/recurrence.go')."
+  (let* ((decoded (decode-time (enghi--date-time date)))
+         (dow (nth (decoded-time-weekday decoded)
+                   '("sun" "mon" "tue" "wed" "thu" "fri" "sat")))
+         (day (decoded-time-day decoded))
+         (month (decoded-time-month decoded)))
+    `(("+1d" . "every day")
+      ("+1w" . "every week")
+      (,(format "weekly:%s" dow) . ,(format "every %s" (capitalize dow)))
+      ("+1m" . "every month")
+      (,(format "monthly:%d" day) . ,(format "on day %d of every month" day))
+      ("+1y" . "every year")
+      (,(format "yearly:%02d-%02d" month day) . "on this date every year"))))
+
+(defun enghi--read-repeat (date current)
+  "Read a repeat rule for a task scheduled on DATE.
+CURRENT is the task's rule. Any rule may be typed; the server validates it.
+Return \"\" for no repeat."
+  (let* ((presets (enghi--repeat-presets date))
+         (cands (append (list (cons enghi--no-repeat ""))
+                        (when (and current (not (assoc current presets)))
+                          (list (cons current "current rule")))
+                        presets))
+         (completion-extra-properties
+          `(:annotation-function
+            ,(lambda (c) (when-let* ((d (cdr (assoc c cands))))
+                           (unless (equal d "") (concat "  " d))))))
+         (rule (string-trim
+                (completing-read "Repeat: " cands nil nil nil nil
+                                 (or current enghi--no-repeat)))))
+    (if (member rule (list "" enghi--no-repeat)) "" rule)))
+
+;;;;; The actions
+
+(defun enghi--patch-task (task fields)
+  "Update TASK with FIELDS (an alist) and return the updated task."
+  (enghi-request "PATCH" (format "/api/tasks/%s" (alist-get 'id task)) fields))
+
+(defun enghi--task-post (task action payload)
+  "POST PAYLOAD to ACTION (such as \"complete\") of TASK."
+  (enghi-request "POST" (format "/api/tasks/%s/%s" (alist-get 'id task) action)
+                 payload))
+
+(defun enghi--task-title (task)
+  "Return the title of TASK for messages."
+  (alist-get 'title task))
+
+(defun enghi--task-next (task)
+  "Move TASK to Next, asking for its project and context."
+  (let* ((project (enghi--read-project task t))
+         (context (when (eq (alist-get 'contexts task) t)
+                    (list (enghi--read-context task)))))
+    (enghi--patch-task
+     task `((state . "next")
+            ,(if project `(project_id . ,(cdr project)) '(clear_project . t))
+            ,@(when context
+                (list (if (car context)
+                          `(context_id . ,(cdar context))
+                        '(clear_context . t))))))
+    (format "→ Next: %s%s" (enghi--task-title task)
+            (if project (format " (%s)" (car project)) ""))))
+
+(defun enghi--task-later (task)
+  "Move TASK to Later, asking for its project."
+  (let ((project (enghi--read-project task nil)))
+    (enghi--patch-task task `((state . "later") (project_id . ,(cdr project))))
+    (format "→ Later: %s (%s)" (enghi--task-title task) (car project))))
+
+(defun enghi--task-waiting (task)
+  "Move TASK to Waiting, asking who it waits for."
+  (let ((who (string-trim (read-string "Waiting for: "
+                                       (enghi--task-field task 'waiting_for)))))
+    (when (string-empty-p who)
+      (user-error "Say who or what the task is waiting for"))
+    (enghi--patch-task task `((state . "waiting") (waiting_for . ,who)))
+    (format "→ Waiting: %s (for %s)" (enghi--task-title task) who)))
+
+(defun enghi--task-schedule (task)
+  "Schedule TASK, asking for the date and how it repeats."
+  (let* ((date (enghi--read-date "Date: " (enghi--task-field task 'scheduled_on)))
+         (rule (enghi--read-repeat date (enghi--task-field task 'recurrence)))
+         (ends (if (and (not (string-empty-p rule))
+                        (y-or-n-p "Stop repeating on a date? "))
+                   (enghi--read-date "Last date: "
+                                     (enghi--task-field task 'recurrence_ends_on))
+                 "")))
+    ;; Empty strings clear the rule and its end, as the web picker does
+    (enghi--patch-task task `((state . "scheduled") (scheduled_on . ,date)
+                              (recurrence . ,rule) (recurrence_ends_on . ,ends)))
+    (format "→ Scheduled: %s (%s%s%s)" (enghi--task-title task) date
+            (if (string-empty-p rule) "" (concat ", " rule))
+            (if (string-empty-p ends) "" (concat " until " ends)))))
+
+(defun enghi--task-drop (task)
+  "Drop TASK after confirming."
+  (if (not (y-or-n-p (format "Drop \"%s\"? " (enghi--task-title task))))
+      (progn (message "Cancelled") nil)
+    (enghi--patch-task task '((state . "dropped")))
+    (format "Dropped: %s" (enghi--task-title task))))
+
+(defun enghi--task-file (task)
+  "File TASK as a wiki page, then open the page below the list."
+  (let* ((title (string-trim (read-string "Page title: " (enghi--task-title task))))
+         (tags (completing-read-multiple
+                "Tags (comma-separated, may be empty): "
+                (mapcar (lambda (tag) (alist-get 'name tag))
+                        (alist-get 'tags (enghi-request "GET" "/api/tags")))))
+         (res (enghi--task-post task "file" `((title . ,title) (body . "")
+                                              (tags . ,(vconcat tags)))))
+         (page (alist-get 'page res)))
+    (when-let* ((win (get-buffer-window)))
+      (select-window win))
+    (enghi--open-below (alist-get 'slug page))
+    (format "Filed: %s → %s" (enghi--task-title task) (alist-get 'title page))))
+
+(defun enghi--task-rename (task)
+  "Rename TASK."
+  (let ((title (string-trim (read-string "Title: " (enghi--task-title task)))))
+    (cond ((string-empty-p title) (user-error "The title cannot be empty"))
+          ((equal title (enghi--task-title task)) (message "Unchanged") nil)
+          (t (enghi--patch-task task `((title . ,title)))
+             (format "Renamed: %s" title)))))
+
+(defun enghi--task-someday (task)
+  "Move TASK to Someday."
+  (enghi--patch-task task '((state . "someday")))
+  (format "→ Someday: %s" (enghi--task-title task)))
+
+(defun enghi--task-completed-message (verb task res)
+  "Return a message for TASK completed with VERB, from the response RES."
+  (let ((next (enghi--task-field (alist-get 'next res) 'scheduled_on)))
+    (format "%s: %s%s" verb (enghi--task-title task)
+            (if next (format " (next: %s)" next) ""))))
+
+(defun enghi--task-done (task)
+  "Complete TASK. A recurring task gets its next instance."
+  (enghi--task-completed-message
+   "Done" task (enghi--task-post task "complete" (make-hash-table))))
+
+(defun enghi--task-skip (task)
+  "Skip this instance of recurring TASK."
+  (if (not (enghi--task-field task 'recurrence))
+      (progn (message "Not a recurring task") nil)
+    (enghi--task-completed-message
+     "Skipped" task (enghi--task-post task "complete" '((skip . t))))))
+
+(defun enghi--task-details (task)
+  "Open the detail page of TASK in this view."
+  (xwidget-webkit-goto-uri
+   (xwidget-webkit-current-session)
+   (enghi--url (format "/gtd/clarify/%s" (alist-get 'id task))))
+  nil)
+
+(defun enghi--xwidget-task-list-p (path)
+  "Return non-nil if PATH is a GTD screen that may list tasks."
+  (and (string-prefix-p "/gtd/" path) (not (enghi--xwidget-gtd-top-p path))))
+
+(defun enghi--xwidget-capture (path)
+  "Capture to the Inbox from Emacs, then refresh PATH if it is a GTD screen."
+  (call-interactively #'enghi-capture)
+  ;; The page does not follow task updates, so refresh GTD screens ourselves
+  (when (string-prefix-p "/gtd" path)
+    (xwidget-webkit-reload)))
+
+(defun enghi--xwidget-search ()
+  "Search from Emacs and show the chosen result in this view."
+  (let ((session (xwidget-webkit-current-session)))
+    (when-let* ((result (enghi-read-search-result))
+                (path (enghi--result-path result)))
+      (xwidget-webkit-goto-uri session (enghi--browse-url-for path)))))
+
 (defun enghi-xwidget-key ()
   "Handle the key used to invoke this command, according to the screen.
 
-On the GTD top page, keys in `enghi--xwidget-gtd-lists' open that list, `c'
-captures from Emacs (`enghi-capture'), and the rest do nothing. Elsewhere the
-key goes to the page. `f' stays webkit's forward everywhere except the GTD
+On every enghi screen, `c' captures from Emacs (`enghi-capture') and `/'
+searches from Emacs, showing the result in this view. On the GTD top page,
+keys in `enghi--xwidget-gtd-lists' open that list and the rest do nothing.
+On the other GTD screens, keys in `enghi--xwidget-task-actions' act on the
+selected task from Emacs (`enghi--xwidget-task-action'). Elsewhere the key
+goes to the page. `f' stays webkit's forward everywhere except the GTD
 lists."
   (interactive)
-  (let ((path (or (enghi--xwidget-path) ""))
-        (key (enghi--xwidget-key-name last-command-event)))
-    (cond ((enghi--xwidget-gtd-top-p path)
-           (cond ((equal key "c")
-                  (call-interactively #'enghi-capture)
-                  ;; The page does not follow task updates, so refresh the
-                  ;; counts ourselves
-                  (xwidget-webkit-reload))
-                 ((assoc key enghi--xwidget-gtd-lists)
+  (let* ((enghi-path (enghi--xwidget-path))
+         (path (or enghi-path ""))
+         (key (enghi--xwidget-key-name last-command-event)))
+    (cond ((and enghi-path (equal key "c")) (enghi--xwidget-capture path))
+          ((and enghi-path (equal key "/")) (enghi--xwidget-search))
+          ((enghi--xwidget-gtd-top-p path)
+           (cond ((assoc key enghi--xwidget-gtd-lists)
                   (xwidget-webkit-goto-uri
                    (xwidget-webkit-current-session)
                    (concat (string-remove-suffix "/" enghi-server-url)
                            (cdr (assoc key enghi--xwidget-gtd-lists)))))
                  ((equal key "f") (xwidget-webkit-forward))))
+          ((and (enghi--xwidget-task-list-p path)
+                (assoc key enghi--xwidget-task-actions))
+           (enghi--xwidget-task-action key))
           ((and (equal key "f") (not (string-prefix-p "/gtd" path)))
            (xwidget-webkit-forward))
           (t (enghi-xwidget-send-key)))))
 
 ;;;; Header line — show available keys tailored to the screen
 ;;
-;; **Assume keys won't be remembered.** Since GTD state changes are handled
-;; by page-side JS (`enghi-xwidget-mode-map' forwards them), show different
-;; keys for each screen.
+;; **Assume keys won't be remembered.** What a key does depends on the screen
+;; (see `enghi-xwidget-key'), so show different keys for each screen.
 
 (defconst enghi--xwidget-keys-gtd-top
   '(("i" . "Inbox") ("n" . "Next") ("w" . "Waiting") ("s" . "Scheduled")
-    ("m" . "Someday") ("p" . "Projects") ("c" . "Capture"))
+    ("m" . "Someday") ("p" . "Projects") ("c" . "Capture") ("/" . "Search"))
   "Keys available on the GTD top page.")
 
 (defconst enghi--xwidget-keys-gtd
-  '(("j/k" . "Move") ("RET" . "Open") ("n" . "Next") ("w" . "Waiting")
+  '(("j/k" . "Move") ("RET" . "Details") ("n" . "Next") ("w" . "Waiting")
     ("s" . "Scheduled") ("l" . "Later") ("m" . "Someday") ("d" . "Done")
-    ("S" . "Skip") ("f" . "File") ("t" . "Rename") ("x" . "Drop") ("c" . "Capture"))
+    ("S" . "Skip") ("f" . "File") ("t" . "Rename") ("x" . "Drop") ("c" . "Capture")
+    ("/" . "Search"))
   "Keys available in the GTD list.")
 
 (defconst enghi--xwidget-keys-page
-  '(("E" . "Edit") ("b/f" . "Back/Fwd") ("r" . "Reload") ("+/-" . "Zoom")
-    ("e" . "Keys to page"))
+  '(("E" . "Edit") ("c" . "Capture") ("/" . "Search") ("b/f" . "Back/Fwd")
+    ("r" . "Reload") ("+/-" . "Zoom"))
   "Keys available when viewing a page.")
 
 (defconst enghi--xwidget-keys-other
@@ -412,10 +793,13 @@ lists."
 Saving (\\[enghi-save]) broadcasts the update from the server, and the window
 above reloads itself (see updated handling in `web/static/app.js')."
   (interactive)
-  (let ((slug (or (enghi--xwidget-slug)
-                  (user-error "This screen is not an enghi page")))
-        ;; Use the window if already open, otherwise show below this window
-        (display-buffer-overriding-action
+  (enghi--open-below (or (enghi--xwidget-slug)
+                         (user-error "This screen is not an enghi page"))))
+
+(defun enghi--open-below (slug)
+  "Open page SLUG in the window below the selected one."
+  ;; Use the window if already open, otherwise show below this window
+  (let ((display-buffer-overriding-action
          '((display-buffer-reuse-window display-buffer-below-selected)
            (window-height . 0.5))))
     (enghi-open slug)))
@@ -756,23 +1140,41 @@ Example:
 ;; 'enghi-command-map "enghi" nil nil 'keymap)
 (defalias 'enghi-command-map enghi-command-map)
 
-;;;###autoload
-(defun enghi-search-command ()
-  "Search, using consult if available."
-  (interactive)
+(defun enghi--result-path (result)
+  "Return the path that shows search RESULT, or nil for an unknown kind."
+  (pcase (alist-get 'kind result)
+    ("page" (format "/wiki/%s" (alist-get 'slug result)))
+    ("project" (format "/gtd/project/%s" (alist-get 'id result)))
+    ("task" (format "/gtd/clarify/%s" (alist-get 'id result)))
+    ("area" (format "/gtd/area/%s" (alist-get 'id result)))))
+
+(defun enghi-read-search-result (&optional prompt)
+  "Search enghi with PROMPT and return the chosen result, or nil.
+Use consult if available, searching on every keystroke."
   (if (require 'enghi-consult nil t)
-      (call-interactively #'enghi-consult-search)
+      (enghi-consult-read-result prompt)
     ;; Keep it working even in environments without consult
-    (let* ((query (read-string "Search enghi: "))
-           (results (enghi-search query))
+    (let* ((query (read-string (or prompt "Search enghi: ")))
            (cands (mapcar (lambda (r)
                             (cons (format "[%s] %s" (alist-get 'kind r) (alist-get 'title r)) r))
-                          results)))
+                          (enghi-search query))))
       (unless cands (user-error "No results found"))
-      (let ((chosen (cdr (assoc (completing-read "Result: " cands nil t) cands))))
-        (if (equal (alist-get 'kind chosen) "page")
-            (enghi-open (alist-get 'slug chosen))
-          (enghi-browse "/"))))))
+      (cdr (assoc (completing-read "Result: " cands nil t) cands)))))
+
+(defun enghi-visit-result (result)
+  "Open search RESULT: a page in an Emacs buffer, anything else in a browser."
+  (let ((path (enghi--result-path result)))
+    (cond ((equal (alist-get 'kind result) "page")
+           (enghi-open (alist-get 'slug result)))
+          (path (enghi-browse path))
+          (t (message "Cannot open kind: %s" (alist-get 'kind result))))))
+
+;;;###autoload
+(defun enghi-search-command ()
+  "Search, using consult if available, and open the chosen result."
+  (interactive)
+  (when-let* ((result (enghi-read-search-result)))
+    (enghi-visit-result result)))
 
 ;;;###autoload
 (defun enghi-new-page (title)

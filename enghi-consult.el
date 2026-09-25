@@ -76,37 +76,33 @@ Store the original data in a text property."
       ;; minibuffer
       (enghi-error nil))))
 
-(defun enghi-consult--visit (candidate &optional browse)
-  "Open CANDIDATE.
-If BROWSE is non-nil, open it in a browser."
-  (when-let* ((result (get-text-property 0 'enghi-result candidate))
-              (kind (alist-get 'kind result)))
-    (pcase kind
-      ("page"
-       (if browse
-           (enghi-browse (format "/wiki/%s" (alist-get 'slug result)))
-         (enghi-open (alist-get 'slug result))))
-      ("project" (enghi-browse (format "/gtd/project/%s" (alist-get 'id result))))
-      ("task" (enghi-browse (format "/gtd/clarify/%s" (alist-get 'id result))))
-      ("area" (enghi-browse (format "/gtd/area/%s" (alist-get 'id result))))
-      (_ (message "Cannot open kind: %s" kind)))))
+;;;###autoload
+(defun enghi-consult-read-result (&optional prompt initial)
+  "Search across enghi on every keystroke and return the chosen result.
+PROMPT defaults to \"Search enghi: \". INITIAL is the initial input. The
+result is an alist as returned by `/api/search', or nil."
+  (when-let* ((selected
+               (consult--read
+                ;; consult's own minimum (`consult-async-min-input', 3 by
+                ;; default) would hide short queries, which matter in Japanese
+                (consult--dynamic-collection #'enghi-consult--candidates
+                  :min-input enghi-consult-min-input)
+                :prompt (or prompt "Search enghi: ")
+                :initial initial
+                :category 'enghi-result
+                :require-match t
+                :sort nil
+                :lookup #'consult--lookup-member
+                :history 'enghi-consult--history)))
+    (get-text-property 0 'enghi-result selected)))
 
 ;;;###autoload
 (defun enghi-consult-search (&optional initial)
   "Search across enghi on every keystroke.
 INITIAL is the initial input."
   (interactive)
-  (let ((selected
-         (consult--read
-          (consult--dynamic-collection #'enghi-consult--candidates)
-          :prompt "Search enghi: "
-          :initial initial
-          :category 'enghi-result
-          :require-match t
-          :sort nil
-          :lookup #'consult--lookup-member
-          :history 'enghi-consult--history)))
-    (when selected (enghi-consult--visit selected))))
+  (when-let* ((result (enghi-consult-read-result nil initial)))
+    (enghi-visit-result result)))
 
 (defvar enghi-consult--history nil
   "History for `enghi-consult-search'.")
@@ -115,25 +111,10 @@ INITIAL is the initial input."
 (defun enghi-consult-search-browse ()
   "Search and display the selected item in an open browser tab."
   (interactive)
-  (let ((selected
-         (consult--read
-          (consult--dynamic-collection #'enghi-consult--candidates)
-          :prompt "Search enghi (browser): "
-          :category 'enghi-result
-          :require-match t
-          :sort nil
-          :lookup #'consult--lookup-member
-          :history 'enghi-consult--history)))
-    (when-let* ((result (and selected (get-text-property 0 'enghi-result selected))))
-      ;; **POST /api/focus navigates the open tab** (DESIGN.md 4.3). This is
-      ;; for keeping a browser open on a separate display.
-      (enghi-focus
-       (pcase (alist-get 'kind result)
-         ("page" (format "/wiki/%s" (alist-get 'slug result)))
-         ("project" (format "/gtd/project/%s" (alist-get 'id result)))
-         ("task" (format "/gtd/clarify/%s" (alist-get 'id result)))
-         ("area" (format "/gtd/area/%s" (alist-get 'id result)))
-         (_ "/"))))))
+  (when-let* ((result (enghi-consult-read-result "Search enghi (browser): ")))
+    ;; **POST /api/focus navigates the open tab** (DESIGN.md 4.3). This is
+    ;; for keeping a browser open on a separate display.
+    (enghi-focus (or (enghi--result-path result) "/"))))
 
 ;;;###autoload
 (defun enghi-consult-insert-link ()
@@ -146,7 +127,8 @@ INITIAL is the initial input."
              (when (>= (length (string-trim input)) enghi-consult-min-input)
                (condition-case nil
                    (mapcar #'enghi-consult--format (enghi-search input "page" 50))
-                 (enghi-error nil)))))
+                 (enghi-error nil))))
+           :min-input enghi-consult-min-input)
           :prompt "Link target: "
           :category 'enghi-result
           :require-match t
