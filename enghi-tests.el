@@ -268,6 +268,32 @@ out."
         (should-not scripts)
         (should (= (length opened) 6))))))
 
+(ert-deftest enghi-test-xwidget-dashboard-g ()
+  "`g' opens the GTD top page from the dashboard and browses elsewhere."
+  (should (eq (lookup-key enghi-xwidget-mode-map "g") #'enghi-xwidget-key))
+  (let ((enghi-server-url "http://127.0.0.1:7777/"))
+    (enghi-tests--with-xwidget-stubs "/"
+      (let ((last-command-event ?g)) (enghi-xwidget-key))
+      (should (equal opened '("http://127.0.0.1:7777/gtd")))
+      (should-not scripts))
+    (dolist (path '("/gtd" "/gtd/inbox" "/wiki/foo" nil))
+      (let (browsed)
+        (cl-letf (((symbol-function 'xwidget-webkit-browse-url)
+                   (lambda (url &optional _new) (interactive (list "https://example.com"))
+                     (setq browsed url))))
+          (enghi-tests--with-xwidget-stubs path
+            (let ((last-command-event ?g)) (enghi-xwidget-key))
+            (should (equal browsed "https://example.com"))
+            (should-not opened)
+            (should-not scripts)))))))
+
+(ert-deftest enghi-test-xwidget-dashboard-header ()
+  "The dashboard header shows `g GTD'; other screens do not."
+  (enghi-tests--with-xwidget-stubs "/"
+    (should (string-match-p "g GTD" (substring-no-properties (enghi--xwidget-header)))))
+  (enghi-tests--with-xwidget-stubs "/wiki/foo"
+    (should-not (string-match-p "GTD" (substring-no-properties (enghi--xwidget-header))))))
+
 ;;;; Acting on the selected task from Emacs
 
 (defun enghi-tests--row (&rest fields)

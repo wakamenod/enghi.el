@@ -266,7 +266,7 @@ is called with the target buffer current during size adjustment, so checking
     ;; `e')
     ;; `enghi-xwidget-key' decides per screen what each one does.
     (dolist (key '("j" "k" "RET" "n" "w" "s" "l" "m" "d" "S" "f" "t" "x" "c" "/"
-                   "i" "p"))
+                   "i" "p" "g"))
       (define-key map (kbd key) #'enghi-xwidget-key))
     map)
   "Keymap for webkit buffers opened by enghi.
@@ -712,7 +712,9 @@ Return \"\" for no repeat."
   "Handle the key used to invoke this command, according to the screen.
 
 On every enghi screen, `c' captures from Emacs (`enghi-capture') and `/'
-searches from Emacs, showing the result in this view. On the GTD top page,
+searches from Emacs, showing the result in this view. On the dashboard
+\(`/'), `g' opens the GTD top page; everywhere else `g' stays
+`xwidget-webkit-browse-url'. On the GTD top page,
 keys in `enghi--xwidget-gtd-lists' open that list and the rest do nothing.
 On the other GTD screens, keys in `enghi--xwidget-task-actions' act on the
 selected task from Emacs (`enghi--xwidget-task-action'). Elsewhere the key
@@ -724,6 +726,12 @@ lists."
          (key (enghi--xwidget-key-name last-command-event)))
     (cond ((and enghi-path (equal key "c")) (enghi--xwidget-capture path))
           ((and enghi-path (equal key "/")) (enghi--xwidget-search))
+          ((equal key "g")
+           (if (equal enghi-path "/")
+               (xwidget-webkit-goto-uri
+                (xwidget-webkit-current-session)
+                (concat (string-remove-suffix "/" enghi-server-url) "/gtd"))
+             (call-interactively #'xwidget-webkit-browse-url)))
           ((enghi--xwidget-gtd-top-p path)
            (cond ((assoc key enghi--xwidget-gtd-lists)
                   (xwidget-webkit-goto-uri
@@ -765,6 +773,10 @@ lists."
     ("b/f" . "Back/Fwd") ("r" . "Reload"))
   "Keys available on other screens.")
 
+(defconst enghi--xwidget-keys-dashboard
+  (append enghi--xwidget-keys-other '(("g" . "GTD")))
+  "Keys available on the dashboard.")
+
 (defun enghi--xwidget-keys-string (keys)
   "Format KEYS (KEY . DESC) into a single line for the header line."
   (mapconcat (lambda (cell)
@@ -778,6 +790,8 @@ lists."
   (let ((path (enghi--xwidget-path)))
     (concat " "
             (cond ((null path) "")
+                  ((equal path "/")
+                   (enghi--xwidget-keys-string enghi--xwidget-keys-dashboard))
                   ((enghi--xwidget-gtd-top-p path)
                    (enghi--xwidget-keys-string enghi--xwidget-keys-gtd-top))
                   ((string-prefix-p "/gtd" path)
