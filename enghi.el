@@ -1163,6 +1163,7 @@ The first line becomes the title, the rest becomes the note."
     (define-key map (kbd "o") #'enghi-focus-page)
     (define-key map (kbd "d") #'enghi-browse-dashboard)
     (define-key map (kbd "D") #'enghi-day)
+    (define-key map (kbd "i") #'enghi-gtd-list)
     (define-key map (kbd "n") #'enghi-new-page)
     ;; Work log (enghi-log.el)
     (define-key map (kbd "l") #'enghi-task-log)
@@ -1259,6 +1260,62 @@ Use consult if available, searching on every keystroke."
 Interactively, with a prefix argument, ask for the date."
   (interactive (list (when current-prefix-arg (enghi--read-day))))
   (enghi-browse (if date (format "/gtd/day/%s" date) "/gtd/day")))
+
+(defconst enghi-gtd-lists
+  '(("Inbox" "/gtd/inbox" inbox)
+    ("Next Actions" "/gtd/next" next)
+    ("Waiting For" "/gtd/waiting" waiting)
+    ("Scheduled" "/gtd/scheduled" scheduled)
+    ("Someday / Maybe" "/gtd/someday" someday)
+    ("Projects" "/gtd/projects" projects)
+    ("Work Record" "/gtd/day" today)
+    ("Weekly Review" "/gtd/review" nil))
+  "The lists on the GTD top page, in its order.
+Each entry is (LABEL PATH COUNT). COUNT is the key of the count in
+/api/lists, `today' to show \"today\", or nil to show nothing.")
+
+(defun enghi--gtd-list-counts ()
+  "Return the counts of the GTD lists as an alist, or nil if unavailable.
+Servers without /api/lists answer with an HTTP error; then there are no
+counts. A server that does not answer still signals."
+  (condition-case nil
+      (enghi-request "GET" "/api/lists")
+    (enghi-http-error nil)))
+
+(defun enghi--gtd-list-annotation (label counts)
+  "Return the annotation of the list LABEL, using COUNTS from /api/lists."
+  (let* ((key (nth 2 (assoc label enghi-gtd-lists)))
+         (note (cond ((eq key 'today) "today")
+                     (key (when-let* ((n (alist-get key counts))) (format "%d" n))))))
+    (when note
+      ;; Pad to the longest label, so the notes line up at the right
+      (let ((width (apply #'max (mapcar (lambda (l) (string-width (car l)))
+                                        enghi-gtd-lists))))
+        (concat (make-string (- width (string-width label)) ?\s)
+                (format "  %5s" note))))))
+
+(defun enghi--read-gtd-list ()
+  "Choose a GTD list and return its path."
+  (let* ((counts (enghi--gtd-list-counts))
+         (completion-extra-properties
+          `(:annotation-function
+            ,(lambda (label) (enghi--gtd-list-annotation label counts))))
+         (label (completing-read "GTD list: "
+                                 (lambda (string pred action)
+                                   ;; Keep the order of the GTD top page
+                                   (if (eq action 'metadata)
+                                       '(metadata (display-sort-function . identity))
+                                     (complete-with-action action enghi-gtd-lists
+                                                           string pred)))
+                                 nil t)))
+    (or (nth 1 (assoc label enghi-gtd-lists)) (user-error "No list chosen"))))
+
+;;;###autoload
+(defun enghi-gtd-list (path)
+  "Choose a GTD list, such as the Inbox, and open it at PATH in the browser.
+The candidates show how many items each list holds."
+  (interactive (list (enghi--read-gtd-list)))
+  (enghi-browse path))
 
 ;;;###autoload
 (defun enghi-setup ()

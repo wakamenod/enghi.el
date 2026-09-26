@@ -109,6 +109,7 @@ git clone https://github.com/wakamenod/enghi.el ~/.emacs.d/site-lisp/enghi.el
 | `b` | `enghi-open-in-browser` | ブラウザで開く |
 | `d` | `enghi-browse-dashboard` | ダッシュボード (GTD 含む) を開く |
 | `D` | `enghi-day` | 今日の作業記録を開く (`C-u` で日付を指定) |
+| `i` | `enghi-gtd-list` | Inbox などの GTD リストを選んで開く |
 | `l` | `enghi-task-log` | タスクの作業ログを書く |
 | `L` | `enghi-task-log-edit` | 作業ログの記録を編集する |
 | `t` | `enghi-task-toggle` | タスクを開始・中断する |

@@ -109,6 +109,7 @@ Press `C-c n n` and enter a title to open a page buffer. Write the body, then sa
 | `b` | `enghi-open-in-browser` | Open in browser |
 | `d` | `enghi-browse-dashboard` | Open dashboard (including GTD) |
 | `D` | `enghi-day` | Open today's work record (`C-u`: ask for a day) |
+| `i` | `enghi-gtd-list` | Choose and open a GTD list, such as the Inbox |
 | `l` | `enghi-task-log` | Write in a task's work log |
 | `L` | `enghi-task-log-edit` | Edit an entry of a task's work log |
 | `t` | `enghi-task-toggle` | Start or pause a task |
