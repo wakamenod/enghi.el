@@ -89,7 +89,7 @@ To update it, run `git pull` in that directory.
 Run `M-x enghi-status`. If it shows the server status, you're connected.
 If you changed the port, set `enghi-server-url` to match.
 
-If the server isn't reachable, opening a page in the browser fails in Emacs, before the request reaches the browser. Otherwise xwidget would show only a WebKit error page that doesn't say what went wrong.
+If the server isn't reachable, opening a page in the browser fails in Emacs with an error message.
 
 ### 4. Write your first page
 
@@ -142,7 +142,7 @@ While you view a page in webkit (for example, after `C-c n b`), press `E` to ope
 
 The header line shows the keys you can use. They change with the view: a page shows keys like `E edit`, and a GTD list shows keys like `n next action` and `d done`.
 
-In the GTD lists, `j` and `k` move the page's cursor as before. The keys that move a task ask their questions in the minibuffer instead of the page's modal. Select a row with `j`/`k`, then press:
+In the GTD lists, `j` and `k` move the page's cursor. The keys that move a task ask their questions in the minibuffer. Select a row with `j`/`k`, then press:
 
 | Key | Asks for | Result |
 |---|---|---|
@@ -158,7 +158,7 @@ In the GTD lists, `j` and `k` move the page's cursor as before. The keys that mo
 | `f` | Page title and tags | Filed as a wiki page, which opens in the lower window |
 | `RET` | — | Opens the task's detail page |
 
-Each prompt defaults to the task's current value, and `C-g` cancels without changing anything. The change goes through the JSON API, and then the list reloads with the same row selected. For the repeat rule, pick one that fits the date (`+1w`, `weekly:fri`, `monthly:25`, …) or type any rule the server accepts.
+Each prompt defaults to the task's current value, and `C-g` cancels without changing anything. After the change, the list reloads with the same row selected. For the repeat rule, pick one that fits the date (`+1w`, `weekly:fri`, `monthly:25`, …) or type any rule the server accepts.
 
 On every enghi screen, `c` and `/` run in Emacs. `c` adds an item to the Inbox from the minibuffer with `enghi-capture`, and reloads the page on GTD screens. `/` searches from Emacs, as you type if consult is installed, and opens the chosen result in this view.
 
@@ -210,7 +210,7 @@ An entry you haven't sent stays in its buffer, and `C-c n l` on the same task br
 
 ### Code links
 
-`enghi-code-link` notes where you read code. It can replace org-capture templates that did the same. From any file, it appends an entry like this to the task's log:
+`enghi-code-link` notes where you read code. From any file, it appends an entry like this to the task's log:
 
 ````markdown
 [internal/web/server.go L120-134](https://github.com/you/repo/blob/3f2a…/internal/web/server.go#L120-L134)
@@ -244,7 +244,7 @@ To view pages inside Emacs instead, change the browse function.
 (setq enghi-browse-function #'enghi-browse-in-xwidget)  ; Default is #'browse-url
 ```
 
-`enghi-browse-in-xwidget` opens pages in xwidget webkit with some padding around the view. With `xwidget-webkit-browse-url`, the page touches the fringes and the mode line. Set the padding with `enghi-xwidget-padding`: an integer pads all four sides equally, and `(horizontal . vertical)` sets left/right and top/bottom separately. `0` fills the whole buffer. The padding applies only to buffers that `enghi` opens.
+`enghi-browse-in-xwidget` opens pages in xwidget webkit with some padding around the view. Set the padding with `enghi-xwidget-padding`: an integer pads all four sides equally, and `(horizontal . vertical)` sets left/right and top/bottom separately. `0` fills the whole buffer. The padding applies only to buffers that `enghi` opens.
 
 ## Startup screen (dashboard.el)
 
@@ -270,7 +270,7 @@ enghi:
 - Today's tasks, with overdue deadlines first and marked
 - Deadlines in the coming days (7 by default, `deadline_warning_days` on the server)
 
-`RET` on a task opens it, and on the Inbox opens the Inbox. On an event, it opens the task made from the event, or today's day page if there is none. The last two lines open the web dashboard and today's day page. Everything opens through `enghi-browse-function`. The section takes one request to `/api/dashboard`. If the server is down or doesn't answer within `enghi-dashboard-timeout` seconds, the section shows `enghi is not running` instead, and `RET` on that line tries again. An older server that doesn't send events, work in progress, or upcoming deadlines shows the rest.
+`RET` on a task opens it, and on the Inbox opens the Inbox. On an event, it opens the task made from the event, or today's day page if there is none. The last two lines open the web dashboard and today's day page. Everything opens through `enghi-browse-function`. If the server is down or doesn't answer within `enghi-dashboard-timeout` seconds, the section shows `enghi is not running` instead, and `RET` on that line tries again. An older server that doesn't send events, work in progress, or upcoming deadlines shows the rest.
 
 The section shows event times and the start of work in Emacs's local time. It doesn't update on a timer. Refresh the dashboard to update it.
 
