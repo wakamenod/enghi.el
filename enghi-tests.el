@@ -847,6 +847,27 @@ The upcoming group is left out, and overdue comes from `deadline_on'."
       (enghi-tests--select "… 2 more")
       (should (equal browsed "/gtd/day")))))
 
+(ert-deftest enghi-test-day ()
+  "`enghi-day' opens today's day page, or with a prefix a chosen day's."
+  ;; Loading org later would put the real `org-read-date' back over the stub
+  (require 'org)
+  (let (browsed)
+    (cl-letf (((symbol-function 'enghi-browse) (lambda (path) (setq browsed path)))
+              ((symbol-function 'org-read-date) (lambda (&rest _) "2026-10-01")))
+      (call-interactively #'enghi-day)
+      (should (equal browsed "/gtd/day"))
+      (let ((current-prefix-arg '(4)))
+        (call-interactively #'enghi-day))
+      (should (equal browsed "/gtd/day/2026-10-01"))))
+  (should (eq (keymap-lookup enghi-command-map "D") #'enghi-day))
+  ;; Without org: a date typed in, today by default
+  (cl-letf (((symbol-function 'read-string) (lambda (_prompt _initial _hist default) default)))
+    (should (equal (enghi--read-day-string) (format-time-string "%F"))))
+  (cl-letf (((symbol-function 'read-string) (lambda (&rest _) " 2026-09-25 ")))
+    (should (equal (enghi--read-day-string) "2026-09-25")))
+  (cl-letf (((symbol-function 'read-string) (lambda (&rest _) "tomorrow")))
+    (should-error (enghi--read-day-string) :type 'user-error)))
+
 (ert-deftest enghi-test-dashboard-section-registered ()
   "Loading dashboard.el registers the `enghi' generator."
   (skip-unless (require 'dashboard nil t))
