@@ -20,6 +20,7 @@
 | `markdown-mode` | 任意 | ページバッファで使用 |
 | `consult` | 任意 | キー入力ごとの検索で使用 |
 | `dashboard` | 任意 | 起動画面の欄で使用 |
+| `browse-at-remote` | 任意 | 作業ログのコードリンクのパーマリンクに使用 |
 
 `markdown-mode` と `consult` はなくても動きます。ない場合は、それぞれ `fundamental-mode` と `completing-read` による検索を使います。
 
@@ -105,6 +106,11 @@ git clone https://github.com/wakamenod/enghi.el ~/.emacs.d/site-lisp/enghi.el
 | `o` | `enghi-focus-page` | ブラウザのタブで該当ページを表示 |
 | `b` | `enghi-open-in-browser` | ブラウザで開く |
 | `d` | `enghi-browse-dashboard` | ダッシュボード (GTD 含む) を開く |
+| `l` | `enghi-task-log` | タスクの作業ログを書く |
+| `L` | `enghi-task-log-edit` | タスクの作業ログを編集する |
+| `t` | `enghi-task-toggle` | タスクを開始・中断する |
+| `r` | `enghi-code-link` | カーソル位置やリージョンのコードへのリンクをログに書く |
+| `R` | `enghi-code-link-with-comment` | 同上。先にコメントを書き足す |
 
 ### ページバッファ
 
@@ -167,6 +173,58 @@ GTD トップ (`/gtd`) では専用のキーを使います。`i` `n` `w` `s` `m
 
 すでにあるタイトルに変えようとすると、競合するページを表示して別のタイトルを聞いてきます。本文はそのまま残ります。
 
+## 作業ログ
+
+GTD のタスクごとに作業ログがあります。試したこと・わかったこと・決めたことを、日時付きの Markdown で書き足していくものです。開始・中断の記録も入ります。最後の記録が開始のタスクは「作業中」です。作業ログのあるサーバ (v0.2.0 より後) が必要です。
+
+以下のコマンドは、どれも最初にタスクを尋ねます。候補は未完了のタスクだけで、作業中のものが先頭に `▶` 付きで並びます。xwidget で Clarify ページ (`/gtd/clarify/…`) を表示していればそのタスクが初期値です。そうでなければ、作業中のタスクが1つだけのときにそれが初期値になります。
+
+| コマンド | |
+|---|---|
+| `enghi-task-log` | 新しい記録を書くバッファを開く |
+| `enghi-task-log-edit` | 記録を選んで (新しい順) 編集する |
+| `enghi-task-log-delete` | 記録を選び、確認のうえ削除する |
+| `enghi-task-start` / `enghi-task-pause` | タスクの開始・中断を記録する。`C-u` を付けると1行のコメントを添える |
+| `enghi-task-toggle` | 作業中なら中断、それ以外なら開始 |
+| `enghi-code-link` | カーソル位置やリージョンのコードへのリンクをログに書く |
+| `enghi-code-link-with-comment` | 同上。ログバッファで開き、コメントを書き足してから送る |
+
+作業中のタスクを開始しても (作業中でないタスクを中断しても) 何も変わらず、その旨を表示します。コメントを添えた場合、コメントは記録として残ります。
+
+### ログバッファ
+
+`enghi-log-mode` はページバッファと同じく `markdown-mode` の上で動きます。
+
+| キー | |
+|---|---|
+| `C-c C-c` | 送信してバッファを閉じる。`C-u` 付きなら、続けてその記録をブラウザで開く |
+| `C-c C-k` | 破棄 (書きかけなら確認する) |
+| `C-c C-l` | ページを選択して `[[link]]` を挿入 |
+| `C-c C-o` | タスクのページを開く (編集中はその記録の位置) |
+| `C-c C-d` | 編集中の記録を削除 |
+
+送信していない記録はバッファに残ります。同じタスクで `C-c n l` を押すと続きから書けます。編集中の記録が別の場所で変更されていた場合は、ページと同じく、サーバ側と手元の内容を `ediff` で並べて表示します。
+
+### コードリンク
+
+`enghi-code-link` は、コードを読んだ場所を org-capture のテンプレートで書き留めていた用途の置き換えです。どのファイルからでも、次のような記録をタスクのログに書き足します。
+
+````markdown
+[internal/web/server.go L120-134](https://github.com/you/repo/blob/3f2a…/internal/web/server.go#L120-L134)
+
+```go
+func (s *Server) routes() {
+	…
+}
+```
+````
+
+- リージョンがあれば、その行範囲へリンクし、下にコードを載せます。共通のインデントは取り除きます。リージョンがなければ現在の行へのリンクだけです。
+- パスはプロジェクト (または VC) のルートからの相対パスです。コードブロックの言語はメジャーモードから決めます (`go-ts-mode` → `go`、`emacs-lisp-mode` → `elisp`)。
+- URL は [browse-at-remote](https://github.com/rmuslimov/browse-at-remote) が入っていればそれで作ります。`browse-at-remote-prefer-symbolic` を `nil` にすると、ブランチではなくコミットに固定したリンクになります。browse-at-remote がないとき、またはリモートがわからないファイルでは、パスと行をリンクなしのテキストで書きます。
+
+検索は作業ログの記録も対象にします。`Log` と表示され、タスクのページのその記録の位置で開きます。
+
 ## ブラウザ連携
 
 別のディスプレイでブラウザを開いておけば、Emacs で選んだ項目をブラウザにも表示できます。
@@ -223,6 +281,7 @@ enghi:
 | `enghi-xwidget-padding` | `(24 . 12)` | `enghi-browse-in-xwidget` の余白 (`(horizontal . vertical)` ピクセル) |
 | `enghi-consult-min-input` | `1` | 検索開始に必要な入力文字数 |
 | `enghi-dashboard-timeout` | `2` | 起動画面の欄がサーバの応答を待つ時間 (秒) |
+| `enghi-code-link-url-function` | `#'enghi--browse-at-remote-url` | コードリンクの URL を返す関数 (なければ `nil` を返す) |
 
 パスワードやトークンの設定は不要です。サーバはループバックからの接続だけを受け付けます。
 
@@ -250,6 +309,7 @@ make test
 | ファイル | |
 |---|---|
 | `enghi.el` | API クライアント、ページ編集、キャプチャ、キーマップ |
+| `enghi-log.el` | GTD タスクの作業ログ、コードリンク |
 | `enghi-consult.el` | consult による検索 |
 | `enghi-dashboard.el` | dashboard.el の起動画面に出す欄 |
 | `enghi-tests.el` | テスト |
