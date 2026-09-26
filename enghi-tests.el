@@ -301,7 +301,7 @@ out."
   (let ((row (list :id "42" :state "inbox" :title "Write report"
                    :project_id "" :project_title "" :context_id ""
                    :waiting_for "" :scheduled_on "" :recurrence ""
-                   :recurrence_ends_on "" :index 2 :contexts :json-false)))
+                   :recurrence_ends_on "" :url "" :index 2 :contexts :json-false)))
     (while fields
       (setq row (plist-put row (pop fields) (pop fields))))
     (json-encode row)))
@@ -484,6 +484,31 @@ first. GETs answer with a few projects, contexts and tags."
       (enghi-tests--press 13)
       (should (equal opened '("http://127.0.0.1:7777/gtd/clarify/42")))
       (should-not scripts))))
+
+(ert-deftest enghi-test-task-open-url ()
+  "`o' opens the task's URL in the browser without reloading, even when done."
+  (should (eq (lookup-key enghi-xwidget-mode-map "o") #'enghi-xwidget-key))
+  (dolist (state '("next" "done"))
+    (let (browsed)
+      (cl-letf (((symbol-function 'browse-url) (lambda (url &rest _) (push url browsed))))
+        (enghi-tests--with-task-action
+            (enghi-tests--row :state state :url "https://example.com/a?b=1")
+          (enghi-tests--press ?o)
+          (should (equal browsed '("https://example.com/a?b=1")))
+          (should-not requests)
+          (should-not opened)
+          (should-not scripts))))))
+
+(ert-deftest enghi-test-task-open-url-none ()
+  "`o' opens nothing when the task has no URL or a non-http(s) one."
+  (dolist (url '("" "javascript:alert(1)"))
+    (let (browsed)
+      (cl-letf (((symbol-function 'browse-url) (lambda (url &rest _) (push url browsed))))
+        (enghi-tests--with-task-action (enghi-tests--row :url url)
+          (enghi-tests--press ?o)
+          (should-not browsed)
+          (should-not requests)
+          (should-not scripts))))))
 
 (ert-deftest enghi-test-task-cancel ()
   "C-g in a prompt makes no request."
