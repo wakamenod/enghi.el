@@ -1160,7 +1160,9 @@ Example:
     ("page" (format "/wiki/%s" (alist-get 'slug result)))
     ("project" (format "/gtd/project/%s" (alist-get 'id result)))
     ("task" (format "/gtd/clarify/%s" (alist-get 'id result)))
-    ("area" (format "/gtd/area/%s" (alist-get 'id result)))))
+    ("area" (format "/gtd/area/%s" (alist-get 'id result)))
+    ;; A work log entry, on its task's Clarify page
+    ("log" (format "/gtd/clarify/%s#log-%s" (alist-get 'task_id result) (alist-get 'id result)))))
 
 (defun enghi-read-search-result (&optional prompt)
   "Search enghi with PROMPT and return the chosen result, or nil.
