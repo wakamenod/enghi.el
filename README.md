@@ -161,8 +161,6 @@ In the GTD lists, `j` and `k` move the page's cursor. The keys that move a task 
 
 Each prompt defaults to the task's current value, and `C-g` cancels without changing anything. After the change, the list reloads with the same row selected. For the repeat rule, pick one that fits the date (`+1w`, `weekly:fri`, `monthly:25`, …) or type any rule the server accepts.
 
-`o` needs a server version that stores a URL on each task.
-
 On every enghi screen, `c` and `/` run in Emacs. `c` adds an item to the Inbox from the minibuffer with `enghi-capture`, and reloads the page on GTD screens. `/` searches from Emacs, as you type if consult is installed, and opens the chosen result in this view.
 
 Other keys, such as `j` and `k`, go straight to the page.
