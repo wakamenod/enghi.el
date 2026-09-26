@@ -1091,6 +1091,21 @@ The only working task is the default, and same titles stay apart."
   (should (eq (lookup-key enghi-command-map "R") #'enghi-code-link-with-comment))
   (should (eq (lookup-key enghi-command-map "t") #'enghi-task-toggle)))
 
+(ert-deftest enghi-test-command-map-autoload ()
+  "The package's autoloads bind `enghi-command-map' as a keymap.
+A leaf or use-package `:bind' then needs no autoload of its own."
+  (skip-unless (fboundp 'loaddefs-generate))
+  (let* ((dir (make-temp-file "enghi-autoloads" t))
+         (file (expand-file-name "enghi-autoloads.el" dir)))
+    (unwind-protect
+        (progn
+          (loaddefs-generate (file-name-directory (locate-library "enghi.el")) file)
+          (with-temp-buffer
+            (insert-file-contents file)
+            (should (search-forward
+                     "(autoload 'enghi-command-map \"enghi\" nil nil 'keymap)" nil t))))
+      (delete-directory dir t))))
+
 ;;;;; Code links
 
 (ert-deftest enghi-test-code-dedent ()

@@ -1165,10 +1165,10 @@ The first line becomes the title, the rest becomes the note."
 Example:
   (global-set-key (kbd \"C-c n\") enghi-command-map)")
 
-;; Placing the keymap in the symbol's function cell allows keymap autoloading
-;; (autoload 'enghi-command-map "enghi" nil nil 'keymap) to bind only the
-;; prefix key in advance and load it when pressed. ###autoload (autoload
-;; 'enghi-command-map "enghi" nil nil 'keymap)
+;; Placing the keymap in the symbol's function cell lets a prefix key be bound
+;; to the symbol before enghi is loaded.  The cookie below puts a keymap
+;; autoload in the package's autoloads file, so pressing the key loads enghi.
+;;;###autoload (autoload 'enghi-command-map "enghi" nil nil 'keymap)
 (defalias 'enghi-command-map enghi-command-map)
 
 (defun enghi--result-path (result)
