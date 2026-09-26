@@ -589,3 +589,145 @@ first. GETs answer with a few projects, contexts and tags."
   (should (equal (enghi--result-path '((kind . "task") (id . 4))) "/gtd/clarify/4"))
   (should (equal (enghi--result-path '((kind . "area") (id . 5))) "/gtd/area/5"))
   (should-not (enghi--result-path '((kind . "other")))))
+
+;;;; The dashboard.el section
+
+(require 'enghi-dashboard)
+
+(defun enghi-tests--date (days)
+  "Return the local date DAYS from today, as YYYY-MM-DD."
+  (format-time-string "%F" (time-add nil (* days 86400))))
+
+(defconst enghi-tests--dashboard
+  `((gtd (inbox_count . 3)
+         (today ((id . 1) (title . "Due today") (deadline_on . ,(enghi-tests--date 0))
+                 (deadline_days . 0))
+                ((id . 2) (title . "Scheduled") (project_title . "House"))
+                ((id . 3) (title . "Late") (deadline_on . ,(enghi-tests--date -2))
+                 (deadline_days . -2)))
+         (upcoming ((id . 4) (title . "Soon") (deadline_on . ,(enghi-tests--date 1))
+                    (deadline_days . 1))
+                   ((id . 5) (title . "Later on") (deadline_on . ,(enghi-tests--date 6))
+                    (deadline_days . 6)))))
+  "What /api/dashboard returns, cut down to what the section reads.")
+
+(defmacro enghi-tests--with-dashboard (response &rest body)
+  "Run BODY in a buffer holding the section rendered from RESPONSE.
+RESPONSE is a form evaluated in place of the request; it may signal. Bind
+`timeout' to `enghi-request-timeout' during the request, and `browsed' and
+`refreshed' to what selecting a line did. dashboard.el's heading is stubbed,
+so this runs without it."
+  (declare (indent 1))
+  `(let (timeout browsed refreshed)
+     (cl-letf (((symbol-function 'enghi-request)
+                (lambda (method path &rest _)
+                  (should (equal (list method path) '("GET" "/api/dashboard")))
+                  (setq timeout enghi-request-timeout)
+                  ,response))
+               ((symbol-function 'enghi-browse) (lambda (path) (setq browsed path)))
+               ((symbol-function 'dashboard-refresh-buffer) (lambda () (setq refreshed t)))
+               ((symbol-function 'dashboard-heading-icon) (lambda (_) ""))
+               ((symbol-function 'dashboard-insert-heading)
+                (lambda (heading &rest _) (insert heading))))
+       (with-temp-buffer
+         (enghi-dashboard-insert 5)
+         ,@body))))
+
+(defun enghi-tests--lines ()
+  "Return the lines of the current buffer."
+  (split-string (buffer-substring-no-properties (point-min) (point-max)) "\n"))
+
+(defun enghi-tests--select (text)
+  "Select the line containing TEXT."
+  (goto-char (point-min))
+  (search-forward text)
+  (widget-apply (widget-at (1- (point))) :action))
+
+(ert-deftest enghi-test-dashboard-section ()
+  "Inbox, then overdue first within Today, then upcoming, from one request."
+  (enghi-tests--with-dashboard enghi-tests--dashboard
+    (should (equal (enghi-tests--lines)
+                   '("enghi:"
+                     "    Inbox 3"
+                     "    2 d. ago:   Late"
+                     "    Today:      Due today"
+                     "    Today:      Scheduled  (House)"
+                     "    In 1 d.:    Soon"
+                     "    In 6 d.:    Later on"
+                     "    Open the dashboard")))
+    (should (= timeout enghi-dashboard-timeout))
+    ;; Inbox is emphasized when not zero, and overdue stands out
+    (goto-char (point-min))
+    (search-forward "Inbox 3")
+    (should (eq (get-text-property (1- (point)) 'face) 'enghi-dashboard-inbox))
+    (search-forward "2 d. ago")
+    (should (eq (get-text-property (1- (point)) 'face) 'enghi-dashboard-overdue))
+    ;; Selecting opens the matching screen
+    (enghi-tests--select "Late")
+    (should (equal browsed "/gtd/clarify/3"))
+    (enghi-tests--select "Inbox")
+    (should (equal browsed "/gtd/inbox"))
+    (enghi-tests--select "Open the dashboard")
+    (should (equal browsed "/"))
+    (should-not refreshed)))
+
+(ert-deftest enghi-test-dashboard-section-server-down ()
+  "A server that does not answer is one line, and selecting it retries."
+  (let ((enghi-server-url "http://127.0.0.1:7777"))
+    (enghi-tests--with-dashboard (signal 'enghi-error '("Cannot connect"))
+      (should (equal (enghi-tests--lines)
+                     '("enghi:" "    enghi is not running (http://127.0.0.1:7777)")))
+      (enghi-tests--select "not running")
+      (should refreshed)
+      (should-not browsed)))
+  ;; For real, with nothing stubbed but dashboard.el: no error
+  (let ((enghi-server-url "http://127.0.0.1:1"))
+    (cl-letf (((symbol-function 'dashboard-heading-icon) (lambda (_) ""))
+              ((symbol-function 'dashboard-insert-heading)
+               (lambda (heading &rest _) (insert heading))))
+      (with-temp-buffer
+        (enghi-dashboard-insert 5)
+        (should (string-match-p "enghi is not running" (buffer-string)))))))
+
+(ert-deftest enghi-test-dashboard-section-old-server ()
+  "A server without `upcoming' or `deadline_days' still works.
+The upcoming group is left out, and overdue comes from `deadline_on'."
+  (enghi-tests--with-dashboard
+      `((gtd (inbox_count . 0)
+             (today ((id . 1) (title . "Now"))
+                    ((id . 2) (title . "Late") (deadline_on . ,(enghi-tests--date -3))))))
+    (should (equal (enghi-tests--lines)
+                   '("enghi:" "    Inbox 0" "    3 d. ago:   Late" "    Today:      Now"
+                     "    Open the dashboard")))))
+
+(ert-deftest enghi-test-dashboard-section-limits ()
+  "Each group shows at most the list size, then how many more."
+  (enghi-tests--with-dashboard
+      `((gtd (inbox_count . 0)
+             (today ,@(mapcar (lambda (i) `((id . ,i) (title . ,(format "Task %d" i))))
+                              (number-sequence 1 7)))
+             (upcoming)))
+    (should (equal (seq-filter (lambda (l) (string-match-p "Task\\|more" l))
+                               (enghi-tests--lines))
+                   '("    Today:      Task 1" "    Today:      Task 2" "    Today:      Task 3"
+                     "    Today:      Task 4" "    Today:      Task 5"
+                     "                … 2 more")))
+    (enghi-tests--select "more")
+    (should (equal browsed "/")))
+  (enghi-tests--with-dashboard '((gtd (inbox_count . 0) (today) (upcoming)))
+    (should (member "    Nothing due" (enghi-tests--lines)))))
+
+(ert-deftest enghi-test-dashboard-section-registered ()
+  "Loading dashboard.el registers the `enghi' generator."
+  (skip-unless (require 'dashboard nil t))
+  (should (eq (alist-get 'enghi dashboard-item-generators) #'enghi-dashboard-insert)))
+
+(ert-deftest enghi-test-dashboard-section-live ()
+  "The section renders from the running server."
+  (cl-letf (((symbol-function 'dashboard-heading-icon) (lambda (_) ""))
+            ((symbol-function 'dashboard-insert-heading)
+             (lambda (heading &rest _) (insert heading))))
+    (with-temp-buffer
+      (enghi-dashboard-insert 5)
+      (should (string-match-p "^    Inbox [0-9]+$" (buffer-string)))
+      (should-not (string-match-p "not running" (buffer-string))))))

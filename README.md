@@ -9,6 +9,7 @@ An Emacs client for [enghi](https://github.com/wakamenod/enghi), a local-only wi
 - Send a one-line item to the GTD Inbox from anywhere
 - Manage GTD tasks from a dashboard in Emacs's webkit view
 - Have an open browser show what you select in Emacs
+- Show the Inbox, today's tasks and upcoming deadlines on the dashboard.el startup screen
 
 ## Requirements
 
@@ -18,6 +19,7 @@ An Emacs client for [enghi](https://github.com/wakamenod/enghi), a local-only wi
 | [enghi](https://github.com/wakamenod/enghi) server | Must be running | |
 | `markdown-mode` | Optional | Used in page buffers |
 | `consult` | Optional | Used for search on each keystroke |
+| `dashboard` | Optional | For the startup screen section |
 
 `markdown-mode` and `consult` are optional. Without them, enghi.el uses `fundamental-mode` and `completing-read` search instead.
 
@@ -185,6 +187,34 @@ To view pages inside Emacs instead, change the browse function.
 
 `enghi-browse-in-xwidget` opens pages in xwidget webkit with some padding around the view. With `xwidget-webkit-browse-url`, the page touches the fringes and the mode line. Set the padding with `enghi-xwidget-padding`: an integer pads all four sides equally, and `(horizontal . vertical)` sets left/right and top/bottom separately. `0` fills the whole buffer. The padding applies only to buffers that `enghi` opens.
 
+## Startup screen (dashboard.el)
+
+`enghi-dashboard.el` adds an enghi section to the [dashboard](https://github.com/emacs-dashboard/emacs-dashboard) startup screen, in place of its agenda:
+
+```
+enghi:
+    Inbox 3
+    2 d. ago:   Pay the invoice
+    Today:      Submit the report
+    In 4 d.:    Renew passport
+    Open the dashboard
+```
+
+- The Inbox count, emphasized when it isn't zero
+- Today's tasks, with overdue deadlines first and marked
+- Deadlines in the coming days (7 by default, `deadline_warning_days` on the server)
+
+`RET` on a task opens it, on the Inbox opens the Inbox, and on the last line opens the web dashboard, all through `enghi-browse-function`. The section takes one request to `/api/dashboard`. If the server is down or doesn't answer within `enghi-dashboard-timeout` seconds, the section shows `enghi is not running` instead, and `RET` on that line tries again. A server older than the upcoming deadlines shows the rest.
+
+```elisp
+(use-package enghi-dashboard
+  :after dashboard
+  :config
+  (add-to-list 'dashboard-items '(enghi . 5) t))
+```
+
+The number is the most tasks shown in each group. enghi.el itself doesn't need dashboard; only this file does.
+
 ## Configuration
 
 | Variable | Default | |
@@ -194,6 +224,7 @@ To view pages inside Emacs instead, change the browse function.
 | `enghi-browse-function` | `#'browse-url` | Function to open in browser |
 | `enghi-xwidget-padding` | `(24 . 12)` | Padding for `enghi-browse-in-xwidget`, in `(horizontal . vertical)` pixels |
 | `enghi-consult-min-input` | `1` | Number of characters typed before search starts |
+| `enghi-dashboard-timeout` | `2` | How long the startup screen section waits for the server (seconds) |
 
 There are no passwords or tokens to set. The server accepts connections from loopback only.
 
@@ -222,4 +253,5 @@ make test
 |---|---|
 | `enghi.el` | API client, page editing, capture, keymaps |
 | `enghi-consult.el` | Search using consult |
+| `enghi-dashboard.el` | Section for the dashboard.el startup screen |
 | `enghi-tests.el` | Tests |
