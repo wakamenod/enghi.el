@@ -157,6 +157,7 @@ In the GTD lists, `j` and `k` move the page's cursor. The keys that move a task 
 | `t` | New title | Renamed |
 | `f` | Page title and tags | Filed as a wiki page, which opens in the lower window |
 | `RET` | — | Opens the task's detail page |
+| `o` | — | Opens the task's URL in the browser |
 
 Each prompt defaults to the task's current value, and `C-g` cancels without changing anything. After the change, the list reloads with the same row selected. For the repeat rule, pick one that fits the date (`+1w`, `weekly:fri`, `monthly:25`, …) or type any rule the server accepts.
 

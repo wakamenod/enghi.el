@@ -266,7 +266,7 @@ is called with the target buffer current during size adjustment, so checking
     ;; `e')
     ;; `enghi-xwidget-key' decides per screen what each one does.
     (dolist (key '("j" "k" "RET" "n" "w" "s" "l" "m" "d" "S" "f" "t" "x" "c" "/"
-                   "i" "p" "g"))
+                   "i" "p" "g" "o"))
       (define-key map (kbd key) #'enghi-xwidget-key))
     map)
   "Keymap for webkit buffers opened by enghi.
@@ -352,7 +352,7 @@ view."
     ("x" . enghi--task-drop) ("f" . enghi--task-file)
     ("t" . enghi--task-rename) ("m" . enghi--task-someday)
     ("d" . enghi--task-done) ("S" . enghi--task-skip)
-    ("Enter" . enghi--task-details))
+    ("o" . enghi--task-open-url) ("Enter" . enghi--task-details))
   "Keys acting on the selected task and their functions.
 Each function takes the task (see `enghi--xwidget-selected-task-script') and
 returns a message after changing it, or nil when the list needs no reload.")
@@ -368,7 +368,7 @@ returns a message after changing it, or nil when the list needs no reload.")
     project_id: d.projectId || '', project_title: d.projectTitle || '',
     context_id: d.contextId || '', waiting_for: d.waitingFor || '',
     scheduled_on: d.scheduledOn || '', recurrence: d.recurrence || '',
-    recurrence_ends_on: d.recurrenceEndsOn || '',
+    recurrence_ends_on: d.recurrenceEndsOn || '', url: d.url || '',
     index: rows.indexOf(li), contexts: document.body.dataset.contexts === 'on'
   });
 })()"
@@ -690,6 +690,16 @@ Return \"\" for no repeat."
    (enghi--url (format "/gtd/clarify/%s" (alist-get 'id task))))
   nil)
 
+(defun enghi--task-open-url (task)
+  "Open the URL of TASK in the external browser.
+Only http(s) URLs are opened."
+  (let ((url (enghi--task-field task 'url)))
+    (cond ((null url) (message "No URL on this task"))
+          ((not (string-match-p "\\`https?://" url))
+           (message "Not an http(s) URL: %s" url))
+          (t (browse-url url))))
+  nil)
+
 (defun enghi--xwidget-task-list-p (path)
   "Return non-nil if PATH is a GTD screen that may list tasks."
   (and (string-prefix-p "/gtd/" path) (not (enghi--xwidget-gtd-top-p path))))
@@ -759,8 +769,8 @@ lists."
 (defconst enghi--xwidget-keys-gtd
   '(("j/k" . "Move") ("RET" . "Details") ("n" . "Next") ("w" . "Waiting")
     ("s" . "Scheduled") ("l" . "Later") ("m" . "Someday") ("d" . "Done")
-    ("S" . "Skip") ("f" . "File") ("t" . "Rename") ("x" . "Drop") ("c" . "Capture")
-    ("/" . "Search"))
+    ("S" . "Skip") ("f" . "File") ("t" . "Rename") ("x" . "Drop") ("o" . "Open URL")
+    ("c" . "Capture") ("/" . "Search"))
   "Keys available in the GTD list.")
 
 (defconst enghi--xwidget-keys-page
