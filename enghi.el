@@ -1152,6 +1152,7 @@ The first line becomes the title, the rest becomes the note."
     (define-key map (kbd "b") #'enghi-open-in-browser)
     (define-key map (kbd "o") #'enghi-focus-page)
     (define-key map (kbd "d") #'enghi-browse-dashboard)
+    (define-key map (kbd "D") #'enghi-day)
     (define-key map (kbd "n") #'enghi-new-page)
     ;; Work log (enghi-log.el)
     (define-key map (kbd "l") #'enghi-task-log)
@@ -1226,6 +1227,28 @@ Use consult if available, searching on every keystroke."
   "Open the dashboard in the browser."
   (interactive)
   (enghi-browse "/"))
+
+(defun enghi--read-day-string ()
+  "Read a date as YYYY-MM-DD with `read-string', defaulting to today."
+  (let* ((today (format-time-string "%F"))
+         (date (string-trim (read-string (format "Day (default %s): " today)
+                                         nil nil today))))
+    (unless (enghi--date-time date)
+      (user-error "Not a date (YYYY-MM-DD): %s" date))
+    date))
+
+(defun enghi--read-day ()
+  "Read a date as YYYY-MM-DD, with org's calendar when org is available."
+  (if (require 'org nil t)
+      (org-read-date nil nil nil "Day: ")
+    (enghi--read-day-string)))
+
+;;;###autoload
+(defun enghi-day (&optional date)
+  "Open the work record page of DATE (YYYY-MM-DD), or of today.
+Interactively, with a prefix argument, ask for the date."
+  (interactive (list (when current-prefix-arg (enghi--read-day))))
+  (enghi-browse (if date (format "/gtd/day/%s" date) "/gtd/day")))
 
 ;;;###autoload
 (defun enghi-setup ()

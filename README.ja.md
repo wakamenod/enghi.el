@@ -9,7 +9,7 @@
 - どこからでも GTD の Inbox へ1行で送る
 - Emacs 内の WebKit で開いたダッシュボードから GTD のタスクを管理する
 - Emacs で選んだ項目を、開いているブラウザにも表示する
-- dashboard.el の起動画面に、Inbox・今日のタスク・近づいている締切を出す
+- dashboard.el の起動画面に、Inbox・今日の予定・作業中のタスク・今日のタスク・近づいている締切を出す
 
 ## 動作要件
 
@@ -106,6 +106,7 @@ git clone https://github.com/wakamenod/enghi.el ~/.emacs.d/site-lisp/enghi.el
 | `o` | `enghi-focus-page` | ブラウザのタブで該当ページを表示 |
 | `b` | `enghi-open-in-browser` | ブラウザで開く |
 | `d` | `enghi-browse-dashboard` | ダッシュボード (GTD 含む) を開く |
+| `D` | `enghi-day` | 今日の作業記録を開く (`C-u` で日付を指定) |
 | `l` | `enghi-task-log` | タスクの作業ログを書く |
 | `L` | `enghi-task-log-edit` | 作業ログの記録を編集する |
 | `t` | `enghi-task-toggle` | タスクを開始・中断する |
@@ -250,17 +251,26 @@ Emacs の中でページを見たい場合は、閲覧用の関数を変更し�
 ```
 enghi:
     Inbox 3
+    All day     祝日  (祝日)
+    09:00–09:30 朝会  (職場)
+    11:00–12:00 設計レビュー  (職場)  @会議室A
+    Working:    報告書を書く  (Q3)  since 10:42 (1h 5m)
     2 d. ago:   Pay the invoice
     Today:      Submit the report
     In 4 d.:    Renew passport
     Open the dashboard
+    Open the day page
 ```
 
 - Inbox の件数。0 でないときは強調します
+- 今日のカレンダーの予定。終日の予定を先に、ほかは開始時刻の順に出します。終わった予定は薄く表示し、進行中の予定は時刻を強調します
+- 作業中のタスク。サーバが作業の開始時刻を送る場合は、その時刻と経過時間も出します。前日以前に始めた作業は日付つきで目立たせるので、中断し忘れに気づけます
 - 今日のタスク。締切を過ぎたものは先頭に、印をつけて出します
 - 近づいている締切 (既定では 7 日以内。サーバの `deadline_warning_days`)
 
-タスクで `RET` を押すとそのタスクを、Inbox の行では Inbox を、最後の行では Web のダッシュボードを開きます。いずれも `enghi-browse-function` で開きます。欄の表示に使うリクエストは `/api/dashboard` への1回だけです。サーバが止まっている、または `enghi-dashboard-timeout` 秒以内に応答しないときは、代わりに `enghi is not running` を1行出します。その行で `RET` を押すと再試行します。近づいている締切に対応していない古いサーバでは、その部分を省いて表示します。
+タスクで `RET` を押すとそのタスクを、Inbox の行では Inbox を開きます。予定の行では、その予定から作ったタスクを開きます。タスクがなければ今日の作業記録ページを開きます。最後の2行は Web のダッシュボードと今日の作業記録ページを開きます。いずれも `enghi-browse-function` で開きます。欄の表示に使うリクエストは `/api/dashboard` への1回だけです。サーバが止まっている、または `enghi-dashboard-timeout` 秒以内に応答しないときは、代わりに `enghi is not running` を1行出します。その行で `RET` を押すと再試行します。予定・作業中のタスク・近づいている締切に対応していない古いサーバでは、その部分を省いて表示します。
+
+予定の時刻と作業の開始時刻は、Emacs のローカル時刻で表示します。欄はタイマーでは更新しません。更新するにはダッシュボードを再表示してください。
 
 ```elisp
 (use-package enghi-dashboard
@@ -269,7 +279,7 @@ enghi:
   (add-to-list 'dashboard-items '(enghi . 5) t))
 ```
 
-数値は、各グループに出すタスクの最大数です。dashboard が必要なのはこのファイルだけで、enghi.el 本体は dashboard に依存しません。
+数値は、各グループに出す行の最大数です。dashboard が必要なのはこのファイルだけで、enghi.el 本体は dashboard に依存しません。
 
 ## 設定
 

@@ -9,7 +9,7 @@ An Emacs client for [enghi](https://github.com/wakamenod/enghi), a local-only wi
 - Send a one-line item to the GTD Inbox from anywhere
 - Manage GTD tasks from a dashboard in Emacs's webkit view
 - Have an open browser show what you select in Emacs
-- Show the Inbox, today's tasks and upcoming deadlines on the dashboard.el startup screen
+- Show the Inbox, today's calendar events, the tasks you're working on, today's tasks and upcoming deadlines on the dashboard.el startup screen
 
 ## Requirements
 
@@ -108,6 +108,7 @@ Press `C-c n n` and enter a title to open a page buffer. Write the body, then sa
 | `o` | `enghi-focus-page` | Focus browser tab on the page |
 | `b` | `enghi-open-in-browser` | Open in browser |
 | `d` | `enghi-browse-dashboard` | Open dashboard (including GTD) |
+| `D` | `enghi-day` | Open today's work record (`C-u`: ask for a day) |
 | `l` | `enghi-task-log` | Write in a task's work log |
 | `L` | `enghi-task-log-edit` | Edit an entry of a task's work log |
 | `t` | `enghi-task-toggle` | Start or pause a task |
@@ -252,17 +253,26 @@ To view pages inside Emacs instead, change the browse function.
 ```
 enghi:
     Inbox 3
+    All day     Holiday  (Home)
+    09:00–09:30 Standup  (Work)
+    11:00–12:00 Design review  (Work)  @Room A
+    Working:    Write the report  (Q3)  since 10:42 (1h 5m)
     2 d. ago:   Pay the invoice
     Today:      Submit the report
     In 4 d.:    Renew passport
     Open the dashboard
+    Open the day page
 ```
 
 - The Inbox count, emphasized when it isn't zero
+- Today's calendar events: all-day ones first, then by start time. The section dims events that have ended and highlights the time of the one in progress
+- The tasks you're working on. If the server sends when work started, the line shows it and how long ago that was. Work started on an earlier day shows the date and stands out, so a forgotten pause is easy to spot
 - Today's tasks, with overdue deadlines first and marked
 - Deadlines in the coming days (7 by default, `deadline_warning_days` on the server)
 
-`RET` on a task opens it, on the Inbox opens the Inbox, and on the last line opens the web dashboard, all through `enghi-browse-function`. The section takes one request to `/api/dashboard`. If the server is down or doesn't answer within `enghi-dashboard-timeout` seconds, the section shows `enghi is not running` instead, and `RET` on that line tries again. A server older than the upcoming deadlines shows the rest.
+`RET` on a task opens it, and on the Inbox opens the Inbox. On an event, it opens the task made from the event, or today's day page if there is none. The last two lines open the web dashboard and today's day page. Everything opens through `enghi-browse-function`. The section takes one request to `/api/dashboard`. If the server is down or doesn't answer within `enghi-dashboard-timeout` seconds, the section shows `enghi is not running` instead, and `RET` on that line tries again. An older server that doesn't send events, work in progress, or upcoming deadlines shows the rest.
+
+The section shows event times and the start of work in Emacs's local time. It doesn't update on a timer. Refresh the dashboard to update it.
 
 ```elisp
 (use-package enghi-dashboard
@@ -271,7 +281,7 @@ enghi:
   (add-to-list 'dashboard-items '(enghi . 5) t))
 ```
 
-The number is the most tasks shown in each group. enghi.el itself doesn't need dashboard; only this file does.
+The number is the most lines shown in each group. enghi.el itself doesn't need dashboard; only this file does.
 
 ## Configuration
 

@@ -717,6 +717,157 @@ The upcoming group is left out, and overdue comes from `deadline_on'."
   (enghi-tests--with-dashboard '((gtd (inbox_count . 0) (today) (upcoming)))
     (should (member "    Nothing due" (enghi-tests--lines)))))
 
+(defun enghi-tests--at (hour minute &optional days)
+  "Return HOUR:MINUTE local time, DAYS from today, as a Lisp time."
+  (let ((now (decode-time)))
+    (encode-time (list 0 minute hour (+ (decoded-time-day now) (or days 0))
+                       (decoded-time-month now) (decoded-time-year now) nil -1 nil))))
+
+(defun enghi-tests--rfc3339 (hour minute &optional days)
+  "Return HOUR:MINUTE local time, DAYS from today, as the server sends it."
+  (format-time-string "%FT%T%:z" (enghi-tests--at hour minute days)))
+
+(defmacro enghi-tests--at-noon (&rest body)
+  "Run BODY with the clock stopped at noon today."
+  (declare (indent 0))
+  `(let ((noon (enghi-tests--at 12 0)))
+     (cl-letf (((symbol-function 'current-time) (lambda () noon)))
+       ,@body)))
+
+(defun enghi-tests--event (id title start end &rest fields)
+  "Return an event of today, START and END as (HOUR MINUTE), with FIELDS."
+  `((id . ,id) (source . "test") (calendar . "Work") (title . ,title)
+    (start . ,(apply #'enghi-tests--rfc3339 start))
+    (end . ,(apply #'enghi-tests--rfc3339 end))
+    (all_day . nil)
+    ,@fields))
+
+(defun enghi-tests--face-at (text)
+  "Return the face of the first character of TEXT in the buffer."
+  (goto-char (point-min))
+  (search-forward text)
+  (get-text-property (match-beginning 0) 'face))
+
+(ert-deftest enghi-test-dashboard-section-day ()
+  "Today's events, then the tasks being worked on, before what is due."
+  (enghi-tests--at-noon
+    (enghi-tests--with-dashboard
+        `((events ,(enghi-tests--event 1 "Plan" '(15 0) '(16 0) '(task_id . 9))
+                  ,(enghi-tests--event 2 "Standup" '(9 0) '(10 0))
+                  ((id . 3) (calendar . "Home") (title . "Holiday")
+                   (start . ,(enghi-tests--rfc3339 0 0)) (end . ,(enghi-tests--rfc3339 0 0 1))
+                   (all_day . t))
+                  ,(enghi-tests--event 4 "Review" '(11 30) '(12 30) '(location . "Room A")))
+          (gtd (working ((id . 7) (title . "Write report") (project_title . "Docs")
+                         (since . ,(enghi-tests--rfc3339 10 42)))
+                        ((id . 8) (title . "Old thing") (since . ,(enghi-tests--rfc3339 9 0 -1)))
+                        ((id . 6) (title . "No start")))
+               ,@(alist-get 'gtd enghi-tests--dashboard)))
+      (should (equal (enghi-tests--lines)
+                     `("enghi:"
+                       "    Inbox 3"
+                       "    All day     Holiday  (Home)"
+                       "    09:00–10:00 Standup  (Work)"
+                       "    11:30–12:30 Review  (Work)  @Room A"
+                       "    15:00–16:00 Plan  (Work)"
+                       "    Working:    Write report  (Docs)  since 10:42 (1h 18m)"
+                       ,(format "    Working:    Old thing  since %s 09:00 (1d 3h)"
+                                (format-time-string "%-m/%-d" (enghi-tests--at 9 0 -1)))
+                       "    Working:    No start"
+                       "    2 d. ago:   Late"
+                       "    Today:      Due today"
+                       "    Today:      Scheduled  (House)"
+                       "    In 1 d.:    Soon"
+                       "    In 6 d.:    Later on"
+                       "    Open the dashboard"
+                       "    Open the day page")))
+      ;; Ended dimmed, in progress marked, the rest as usual
+      (should (eq (enghi-tests--face-at "Standup") 'enghi-dashboard-past-event))
+      (should (eq (enghi-tests--face-at "11:30") 'enghi-dashboard-now))
+      (should (eq (enghi-tests--face-at "15:00") 'enghi-dashboard-label))
+      (should (eq (enghi-tests--face-at "Working:") 'enghi-dashboard-now))
+      (should (eq (enghi-tests--face-at "since 10:42") 'enghi-dashboard-label))
+      ;; Work started on an earlier day stands out
+      (should (eq (enghi-tests--face-at "since 9") 'enghi-dashboard-stale-work))
+      ;; An event opens its task, or else the day page
+      (enghi-tests--select "Plan")
+      (should (equal browsed "/gtd/clarify/9"))
+      (enghi-tests--select "Review")
+      (should (equal browsed "/gtd/day"))
+      (enghi-tests--select "Write report")
+      (should (equal browsed "/gtd/clarify/7"))
+      (enghi-tests--select "day page")
+      (should (equal browsed "/gtd/day")))))
+
+(ert-deftest enghi-test-dashboard-section-day-empty ()
+  "Empty `events' and `working' add no lines, only the day page link."
+  (enghi-tests--with-dashboard '((events) (gtd (inbox_count . 0) (working) (today) (upcoming)))
+    (should (equal (enghi-tests--lines)
+                   '("enghi:" "    Inbox 0" "    Nothing due" "    Open the dashboard"
+                     "    Open the day page")))))
+
+(ert-deftest enghi-test-dashboard-section-time-zone ()
+  "Event times are shown in local time whatever offset they carry."
+  (let ((tz (getenv "TZ")))
+    (unwind-protect
+        (progn
+          (setenv "TZ" "UTC0")
+          (cl-letf (((symbol-function 'current-time)
+                     (lambda () (parse-iso8601-time-string "2026-09-26T05:00:00Z"))))
+            (enghi-tests--with-dashboard
+                '((events ((title . "Tokyo") (all_day . nil)
+                           (start . "2026-09-26T15:00:00+09:00")
+                           (end . "2026-09-26T16:00:00+09:00")))
+                  (gtd (inbox_count . 0) (working ((id . 1) (title . "Work")
+                                                   (since . "2026-09-26T13:30:00+09:00")))))
+              (should (member "    06:00–07:00 Tokyo" (enghi-tests--lines)))
+              (should (member "    Working:    Work  since 04:30 (30m)" (enghi-tests--lines))))))
+      (setenv "TZ" tz))))
+
+(ert-deftest enghi-test-dashboard-section-day-limits ()
+  "Events and working tasks show at most the list size, then how many more."
+  (enghi-tests--at-noon
+    (enghi-tests--with-dashboard
+        `((events ,@(mapcar (lambda (i) (enghi-tests--event i (format "Event %d" i)
+                                                            (list (+ 12 i) 0) (list (+ 13 i) 0)))
+                            (number-sequence 1 7)))
+          (gtd (inbox_count . 0)
+               (working ,@(mapcar (lambda (i) `((id . ,i) (title . ,(format "Task %d" i))))
+                                  (number-sequence 1 6)))))
+      (should (equal (seq-filter (lambda (l) (string-match-p "Event\\|Task\\|more" l))
+                                 (enghi-tests--lines))
+                     '("    13:00–14:00 Event 1  (Work)" "    14:00–15:00 Event 2  (Work)"
+                       "    15:00–16:00 Event 3  (Work)" "    16:00–17:00 Event 4  (Work)"
+                       "    17:00–18:00 Event 5  (Work)"
+                       "                … 2 more"
+                       "    Working:    Task 1" "    Working:    Task 2" "    Working:    Task 3"
+                       "    Working:    Task 4" "    Working:    Task 5"
+                       "                … 1 more")))
+      ;; More events are on the day page
+      (enghi-tests--select "… 2 more")
+      (should (equal browsed "/gtd/day")))))
+
+(ert-deftest enghi-test-day ()
+  "`enghi-day' opens today's day page, or with a prefix a chosen day's."
+  ;; Loading org later would put the real `org-read-date' back over the stub
+  (require 'org)
+  (let (browsed)
+    (cl-letf (((symbol-function 'enghi-browse) (lambda (path) (setq browsed path)))
+              ((symbol-function 'org-read-date) (lambda (&rest _) "2026-10-01")))
+      (call-interactively #'enghi-day)
+      (should (equal browsed "/gtd/day"))
+      (let ((current-prefix-arg '(4)))
+        (call-interactively #'enghi-day))
+      (should (equal browsed "/gtd/day/2026-10-01"))))
+  (should (eq (keymap-lookup enghi-command-map "D") #'enghi-day))
+  ;; Without org: a date typed in, today by default
+  (cl-letf (((symbol-function 'read-string) (lambda (_prompt _initial _hist default) default)))
+    (should (equal (enghi--read-day-string) (format-time-string "%F"))))
+  (cl-letf (((symbol-function 'read-string) (lambda (&rest _) " 2026-09-25 ")))
+    (should (equal (enghi--read-day-string) "2026-09-25")))
+  (cl-letf (((symbol-function 'read-string) (lambda (&rest _) "tomorrow")))
+    (should-error (enghi--read-day-string) :type 'user-error)))
+
 (ert-deftest enghi-test-dashboard-section-registered ()
   "Loading dashboard.el registers the `enghi' generator."
   (skip-unless (require 'dashboard nil t))
