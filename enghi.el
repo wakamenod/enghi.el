@@ -1134,6 +1134,16 @@ The first line becomes the title, the rest becomes the note."
 
 ;;;; ------------------------------------------------------- Entry points
 
+;; The work log lives in enghi-log.el, loaded on first use
+(autoload 'enghi-task-log "enghi-log" nil t)
+(autoload 'enghi-task-log-edit "enghi-log" nil t)
+(autoload 'enghi-task-log-delete "enghi-log" nil t)
+(autoload 'enghi-task-start "enghi-log" nil t)
+(autoload 'enghi-task-pause "enghi-log" nil t)
+(autoload 'enghi-task-toggle "enghi-log" nil t)
+(autoload 'enghi-code-link "enghi-log" nil t)
+(autoload 'enghi-code-link-with-comment "enghi-log" nil t)
+
 (defvar enghi-command-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "f") #'enghi-find-page)
@@ -1143,6 +1153,12 @@ The first line becomes the title, the rest becomes the note."
     (define-key map (kbd "o") #'enghi-focus-page)
     (define-key map (kbd "d") #'enghi-browse-dashboard)
     (define-key map (kbd "n") #'enghi-new-page)
+    ;; Work log (enghi-log.el)
+    (define-key map (kbd "l") #'enghi-task-log)
+    (define-key map (kbd "L") #'enghi-task-log-edit)
+    (define-key map (kbd "r") #'enghi-code-link)
+    (define-key map (kbd "R") #'enghi-code-link-with-comment)
+    (define-key map (kbd "t") #'enghi-task-toggle)
     map)
   "Keymap for enghi commands.
 Example:
@@ -1160,7 +1176,9 @@ Example:
     ("page" (format "/wiki/%s" (alist-get 'slug result)))
     ("project" (format "/gtd/project/%s" (alist-get 'id result)))
     ("task" (format "/gtd/clarify/%s" (alist-get 'id result)))
-    ("area" (format "/gtd/area/%s" (alist-get 'id result)))))
+    ("area" (format "/gtd/area/%s" (alist-get 'id result)))
+    ;; A work log entry, on its task's Clarify page
+    ("log" (format "/gtd/clarify/%s#log-%s" (alist-get 'task_id result) (alist-get 'id result)))))
 
 (defun enghi-read-search-result (&optional prompt)
   "Search enghi with PROMPT and return the chosen result, or nil.

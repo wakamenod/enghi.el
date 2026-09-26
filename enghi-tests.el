@@ -731,3 +731,400 @@ The upcoming group is left out, and overdue comes from `deadline_on'."
       (enghi-dashboard-insert 5)
       (should (string-match-p "^    Inbox [0-9]+$" (buffer-string)))
       (should-not (string-match-p "not running" (buffer-string))))))
+
+;;;; The work log
+
+(require 'enghi-log)
+
+(defconst enghi-tests--open-tasks
+  '(("next" ((id . 1) (title . "Write report") (state . "next"))
+            ((id . 2) (title . "Fix bug") (state . "next") (working . t)
+             (project_title . "enghi")))
+    ("inbox" ((id . 3) (title . "Call Bob") (state . "inbox")))
+    ("someday" ((id . 4) (title . "Write report") (state . "someday"))))
+  "Open tasks per state, as /api/tasks?state= returns them.")
+
+(defmacro enghi-tests--with-log-server (handler &rest body)
+  "Run BODY with `enghi-request' answered by HANDLER.
+HANDLER is called with METHOD, PATH and PAYLOAD for anything but the task
+lists, which come from `enghi-tests--open-tasks'. Bind `requests' to the
+other requests, as (METHOD PATH PAYLOAD), oldest first, and `browsed' to the
+path given to `enghi-browse'. No xwidget is shown."
+  (declare (indent 1))
+  `(let ((requests nil) (browsed nil))
+     (cl-letf (((symbol-function 'enghi-request)
+                (lambda (method path &optional payload params)
+                  (if (equal path "/api/tasks")
+                      `((tasks ,@(cdr (assoc (alist-get 'state params)
+                                             enghi-tests--open-tasks))))
+                    (setq requests (append requests (list (list method path payload))))
+                    (funcall ,handler method path payload))))
+               ((symbol-function 'enghi-browse) (lambda (path) (setq browsed path)))
+               ((symbol-function 'enghi--xwidget-path) (lambda () nil)))
+       ,@body)))
+
+(defun enghi-tests--answer (&rest cands)
+  "Return a `completing-read' stub choosing the first of CANDS offered.
+It also records what was offered and the default in `enghi-tests--offered'."
+  (lambda (_prompt collection &rest args)
+    (let ((all (all-completions "" collection)))
+      (setq enghi-tests--offered (list all (nth 4 args)))
+      (or (seq-find (lambda (c) (member c all)) cands)
+          (error "None of %S offered in %S" cands all)))))
+
+(defvar enghi-tests--offered nil
+  "What the last stubbed `completing-read' offered: (CANDIDATES DEFAULT).")
+
+(ert-deftest enghi-test-log-result-path ()
+  "A work log search result opens its task's Clarify page at the entry."
+  (should (equal (enghi--result-path '((kind . "log") (id . 9) (task_id . 4)))
+                 "/gtd/clarify/4#log-9"))
+  ;; The fragment reaches the browser
+  (let ((enghi-server-url "http://127.0.0.1:7777") captured)
+    (cl-letf (((symbol-function 'enghi--ensure-server) #'ignore))
+      (let ((enghi-browse-function (lambda (url) (setq captured url))))
+        (enghi-visit-result '((kind . "log") (id . 9) (task_id . 4)))))
+    (should (equal captured "http://127.0.0.1:7777/gtd/clarify/4#log-9")))
+  (when (require 'enghi-consult nil t)
+    (should (equal (enghi-consult--kind-label "log") "Log"))))
+
+(ert-deftest enghi-test-log-picker-order ()
+  "Working tasks come first and marked, then the others by state.
+The only working task is the default, and same titles stay apart."
+  (enghi-tests--with-log-server #'ignore
+    (cl-letf (((symbol-function 'completing-read) (enghi-tests--answer "  Call Bob")))
+      (should (equal (alist-get 'id (enghi-read-task "Task: ")) 3)))
+    (should (equal (car enghi-tests--offered)
+                   '("▶ Fix bug  (enghi)" "  Write report" "  Call Bob" "  Write report  #4")))
+    (should (equal (cadr enghi-tests--offered) "▶ Fix bug  (enghi)"))))
+
+(ert-deftest enghi-test-log-picker-xwidget-default ()
+  "The task on a Clarify page in xwidget is the default."
+  (enghi-tests--with-log-server #'ignore
+    (cl-letf (((symbol-function 'enghi--xwidget-path) (lambda () "/gtd/clarify/3"))
+              ((symbol-function 'completing-read) (enghi-tests--answer "  Call Bob")))
+      (enghi-read-task "Task: ")
+      (should (equal (cadr enghi-tests--offered) "  Call Bob"))))
+  ;; No working task and no Clarify page: no default
+  (let ((enghi-tests--open-tasks '(("next" ((id . 1) (title . "A"))
+                                            ((id . 2) (title . "B"))))))
+    (enghi-tests--with-log-server #'ignore
+      (cl-letf (((symbol-function 'enghi--xwidget-path) (lambda () "/gtd/next"))
+                ((symbol-function 'completing-read) (enghi-tests--answer "  A")))
+        (enghi-read-task "Task: ")
+        (should-not (cadr enghi-tests--offered))))))
+
+(ert-deftest enghi-test-log-post-note ()
+  "C-c C-c posts the buffer as a note and closes it; C-u opens the entry."
+  (enghi-tests--with-log-server
+      (lambda (_m _p _payload) '((log (id . 11) (task_id . 2)) (created . t)))
+    (let ((buf (enghi-task-log '((id . 2) (title . "Fix bug")))))
+      (with-current-buffer buf
+        (should (equal (buffer-name) "*enghi log: Fix bug*"))
+        (should enghi-log-mode)
+        (should (eq (key-binding (kbd "C-c C-c")) #'enghi-log-commit))
+        (should (eq (key-binding (kbd "C-c C-l")) #'enghi-insert-link))
+        (insert "Found the cause.\n")
+        (enghi-log-commit '(4)))
+      (should-not (buffer-live-p buf)))
+    (should (equal requests '(("POST" "/api/tasks/2/logs"
+                               ((kind . "note") (body . "Found the cause.\n"))))))
+    (should (equal browsed "/gtd/clarify/2#log-11"))))
+
+(ert-deftest enghi-test-log-empty-refused ()
+  "An empty entry is refused without a request, and the buffer stays."
+  (enghi-tests--with-log-server #'ignore
+    (let ((buf (enghi-task-log '((id . 2) (title . "Fix bug")))))
+      (unwind-protect
+          (with-current-buffer buf
+            (insert "  \n\n")
+            (should-error (enghi-log-commit) :type 'user-error)
+            (should (buffer-live-p buf)))
+        (kill-buffer buf)))
+    (should-not requests)))
+
+(ert-deftest enghi-test-log-server-error-is-user-error ()
+  "A refusal from the server is a `user-error' with its message."
+  (enghi-tests--with-log-server
+      (lambda (&rest _) (signal 'enghi-http-error '(400 "cannot start a task that is done")))
+    (let ((err (should-error (enghi-task-start '((id . 2) (title . "Fix bug")))
+                             :type 'user-error)))
+      (should (equal (cadr err) "cannot start a task that is done")))))
+
+(ert-deftest enghi-test-log-edit-conflict ()
+  "A 409 on saving an edit keeps the text and shows both versions."
+  (let (shown)
+    (enghi-tests--with-log-server
+        (lambda (method _path _payload)
+          (if (equal method "GET")
+              '((logs ((id . 5) (kind . "note") (body . "Old") (version . 1)
+                       (created_at . "2026-09-26 01:02:03"))
+                      ((id . 6) (kind . "start") (body . "")
+                       (created_at . "2026-09-26 02:00:00"))))
+            (signal 'enghi-version-conflict
+                    (list "updated elsewhere" '((id . 5) (body . "Theirs") (version . 2))))))
+      (cl-letf (((symbol-function 'enghi--show-conflict)
+                 (lambda (current body) (setq shown (list current body))))
+                ((symbol-function 'completing-read)
+                 (enghi-tests--answer "  Fix bug  (enghi)" "▶ Fix bug  (enghi)")))
+        (let* ((task (enghi-read-task "Task: "))
+               (log (progn
+                      (fset 'completing-read
+                            (lambda (_p coll &rest _)
+                              ;; Marks are not editable
+                              (should (= (length (all-completions "" coll)) 1))
+                              (car (all-completions "" coll))))
+                      (enghi--read-log task "Entry: " t)))
+               (buf (enghi-task-log-edit task log)))
+          (unwind-protect
+              (with-current-buffer buf
+                (should (equal (buffer-name) "*enghi log: Fix bug #5*"))
+                (should (equal (buffer-string) "Old"))
+                (erase-buffer)
+                (insert "Mine")
+                (should-not (enghi-log-commit))
+                ;; **The input must remain**, still at the version it was
+                ;; fetched at
+                (should (buffer-live-p buf))
+                (should (equal (buffer-string) "Mine"))
+                (should (= enghi-log-version 1)))
+            (kill-buffer buf))))
+      (should (equal (car (last requests))
+                     '("PATCH" "/api/task-logs/5" ((body . "Mine") (version . 1))))))
+    (should (equal shown '(((id . 5) (body . "Theirs") (version . 2)) "Mine")))))
+
+(ert-deftest enghi-test-log-delete-while-editing ()
+  "C-c C-d in an edit buffer deletes that entry after confirming."
+  (enghi-tests--with-log-server (lambda (&rest _) '((ok . t)))
+    (let ((buf (enghi-task-log-edit '((id . 2) (title . "Fix bug"))
+                                    '((id . 5) (body . "Old") (version . 1)))))
+      (with-current-buffer buf
+        (cl-letf (((symbol-function 'yes-or-no-p) (lambda (_) nil)))
+          (enghi-task-log-delete))
+        (should-not requests)
+        (cl-letf (((symbol-function 'yes-or-no-p) (lambda (_) t)))
+          (enghi-task-log-delete)))
+      (should-not (buffer-live-p buf))
+      (should (equal requests '(("DELETE" "/api/task-logs/5" nil)))))))
+
+(ert-deftest enghi-test-log-start-pause ()
+  "Start and pause report the new state, and a no-op says so."
+  (let (answer)
+    (enghi-tests--with-log-server (lambda (&rest _) answer)
+      (let ((task '((id . 2) (title . "Fix bug"))))
+        (setq answer '((log (kind . "start")) (created . t) (working . t)))
+        (should (equal (enghi-task-start task) "▶ Started: Fix bug"))
+        (setq answer '((log (kind . "start")) (created . nil) (working . t)))
+        (should (equal (enghi-task-start task) "Already working on Fix bug"))
+        (setq answer '((log (kind . "note")) (created . t) (working . t)))
+        (should (equal (enghi-task-start task "still on it")
+                       "Already working on Fix bug; comment logged"))
+        (setq answer '((log (kind . "pause")) (created . t) (working . nil)))
+        (should (equal (enghi-task-pause task "lunch") "⏸ Paused: Fix bug"))
+        (setq answer '((log . nil) (created . nil) (working . nil)))
+        (should (equal (enghi-task-pause task) "Fix bug is not being worked on"))
+        ;; Toggle follows the task's working flag
+        (setq answer '((log (kind . "pause")) (created . t)))
+        (enghi-task-toggle '((id . 2) (title . "Fix bug") (working . t))))
+      (should (equal (mapcar #'caddr requests)
+                     '(((kind . "start") (body . "")) ((kind . "start") (body . ""))
+                       ((kind . "start") (body . "still on it"))
+                       ((kind . "pause") (body . "lunch")) ((kind . "pause") (body . ""))
+                       ((kind . "pause") (body . ""))))))))
+
+(ert-deftest enghi-test-log-keys ()
+  "The work log commands are on the command map."
+  (should (eq (lookup-key enghi-command-map "l") #'enghi-task-log))
+  (should (eq (lookup-key enghi-command-map "L") #'enghi-task-log-edit))
+  (should (eq (lookup-key enghi-command-map "r") #'enghi-code-link))
+  (should (eq (lookup-key enghi-command-map "R") #'enghi-code-link-with-comment))
+  (should (eq (lookup-key enghi-command-map "t") #'enghi-task-toggle)))
+
+;;;;; Code links
+
+(ert-deftest enghi-test-code-dedent ()
+  "Common indentation goes, blank lines do not count, tabs stay tabs."
+  (should (equal (enghi--dedent "    a\n\n      b\n    c") "a\n\n  b\nc"))
+  (should (equal (enghi--dedent "\t\tx\n\ty") "\tx\ny"))
+  (should (equal (enghi--dedent "a\n  b") "a\n  b")))
+
+(ert-deftest enghi-test-code-lang ()
+  "The code block language comes from the major mode."
+  (should (equal (enghi--code-lang 'go-ts-mode) "go"))
+  (should (equal (enghi--code-lang 'go-mode) "go"))
+  (should (equal (enghi--code-lang 'emacs-lisp-mode) "elisp"))
+  (should (equal (enghi--code-lang 'python-ts-mode) "python"))
+  (should (equal (enghi--code-lang 'c++-mode) "cpp"))
+  (should (equal (enghi--code-lang 'fundamental-mode) ""))
+  (should (equal (enghi--code-lang 'text-mode) ""))
+  (should (equal (enghi--code-lang 'weird) "")))
+
+(defmacro enghi-tests--in-source (text &rest body)
+  "Run BODY in a `go-mode'-like buffer visiting a file in a git repo holding TEXT."
+  (declare (indent 1))
+  `(let* ((root (file-name-as-directory (make-temp-file "enghi-repo" t)))
+          (file (expand-file-name "internal/web/server.go" root)))
+     (unwind-protect
+         (progn
+           (make-directory (file-name-directory file) t)
+           (make-directory (expand-file-name ".git" root))
+           (with-temp-buffer
+             (insert ,text)
+             (setq buffer-file-name file)
+             (setq major-mode 'go-ts-mode)
+             (transient-mark-mode 1)
+             (cl-letf (((symbol-function 'project-current)
+                        (lambda (&rest _) (list 'transient root)))
+                       ((symbol-function 'project-root) (lambda (p) (nth 1 p))))
+               ,@body)
+             (set-buffer-modified-p nil)
+             (setq buffer-file-name nil)))
+       (delete-directory root t))))
+
+(defconst enghi-tests--go "package web\n\nfunc a() {\n\tif x {\n\t\treturn\n\t}\n}\n")
+
+(ert-deftest enghi-test-code-link-region ()
+  "A region links its lines and puts them, dedented, in a code block."
+  (enghi-tests--in-source enghi-tests--go
+    (let ((enghi-code-link-url-function (lambda () "https://github.com/u/r/blob/abc/x.go#L4-L6")))
+      (goto-char (point-min))
+      (forward-line 3)
+      (push-mark (point) t t)
+      ;; Ending at the start of line 7 does not take line 7
+      (forward-line 3)
+      (should (equal (enghi--code-link-entry)
+                     (concat "[internal/web/server.go L4-6](https://github.com/u/r/blob/abc/x.go#L4-L6)\n\n"
+                             "```go\nif x {\n\treturn\n}\n```"))))))
+
+(ert-deftest enghi-test-code-link-point ()
+  "Without a region, link the current line only; no URL means plain text."
+  (enghi-tests--in-source enghi-tests--go
+    (deactivate-mark)
+    (goto-char (point-min))
+    (forward-line 2)
+    (let ((enghi-code-link-url-function (lambda () "https://h/x.go#L3")))
+      (should (equal (enghi--code-link-entry) "[internal/web/server.go L3](https://h/x.go#L3)")))
+    (let ((enghi-code-link-url-function #'ignore))
+      (should (equal (enghi--code-link-entry) "internal/web/server.go L3")))))
+
+(ert-deftest enghi-test-code-link-browse-at-remote ()
+  "browse-at-remote gives the URL, with the line even without a region."
+  (skip-unless (require 'browse-at-remote nil t))
+  (let (line-option)
+    (cl-letf (((symbol-function 'browse-at-remote-get-url)
+               (lambda ()
+                 (setq line-option browse-at-remote-add-line-number-if-no-region-selected)
+                 "https://github.com/u/r/blob/abc/x.go#L3")))
+      (should (equal (enghi--browse-at-remote-url) "https://github.com/u/r/blob/abc/x.go#L3"))
+      (should (eq line-option t)))
+    ;; A file with no known remote: no URL rather than an error
+    (cl-letf (((symbol-function 'browse-at-remote-get-url)
+               (lambda () (error "Sorry, I'm not sure what to do with this"))))
+      (should-not (enghi--browse-at-remote-url)))))
+
+(ert-deftest enghi-test-code-link-without-browse-at-remote ()
+  "Without browse-at-remote installed, there is no URL, and no error."
+  (let ((featurep (symbol-function 'featurep))
+        (require (symbol-function 'require)))
+    (cl-letf (((symbol-function 'featurep)
+               (lambda (f &rest r) (unless (eq f 'browse-at-remote) (apply featurep f r))))
+              ((symbol-function 'require)
+               (lambda (f &rest r) (unless (eq f 'browse-at-remote) (apply require f r))))
+              ((symbol-function 'browse-at-remote-get-url)
+               (lambda () (error "Should not be called"))))
+      (should-not (enghi--browse-at-remote-url)))))
+
+(ert-deftest enghi-test-code-link-posts ()
+  "`enghi-code-link' posts the entry to the chosen task."
+  (enghi-tests--in-source enghi-tests--go
+    (let ((enghi-code-link-url-function #'ignore))
+      (goto-char (point-min))
+      (enghi-tests--with-log-server (lambda (&rest _) '((created . t)))
+        (cl-letf (((symbol-function 'completing-read) (enghi-tests--answer "▶ Fix bug  (enghi)")))
+          (enghi-code-link))
+        ;; The working task is the default
+        (should (equal (cadr enghi-tests--offered) "▶ Fix bug  (enghi)"))
+        (should (equal requests '(("POST" "/api/tasks/2/logs"
+                                   ((kind . "note") (body . "internal/web/server.go L1"))))))))))
+
+(ert-deftest enghi-test-code-link-with-comment ()
+  "With a comment, the entry opens in the log buffer, after any unsent text."
+  (enghi-tests--in-source enghi-tests--go
+    (let ((enghi-code-link-url-function #'ignore))
+      (goto-char (point-min))
+      (enghi-tests--with-log-server #'ignore
+        (cl-letf (((symbol-function 'completing-read) (enghi-tests--answer "▶ Fix bug  (enghi)")))
+          (let ((source (current-buffer))
+                (buf (enghi-code-link-with-comment)))
+            (unwind-protect
+                (progn
+                  (with-current-buffer buf
+                    (should (equal (buffer-string) "internal/web/server.go L1\n\n"))
+                    (should (buffer-modified-p)))
+                  (with-current-buffer source
+                    (forward-line 2)
+                    (enghi-code-link '(4)))
+                  (with-current-buffer buf
+                    (should (equal (buffer-string)
+                                   "internal/web/server.go L1\n\ninternal/web/server.go L3\n\n"))))
+              (with-current-buffer buf (set-buffer-modified-p nil))
+              (kill-buffer buf))))
+        (should-not requests)))))
+
+;;;;; Against the running server
+
+(ert-deftest enghi-test-log-live ()
+  "Start, log, edit (with a conflict), search, pause and delete on the server."
+  (let* ((title (enghi-tests--unique "Log target"))
+         (task (enghi-capture title))
+         (id (alist-get 'id task))
+         (word (enghi-tests--unique "zyxlogword")))
+    (should (string-match-p "Started" (enghi-task-start task)))
+    (should (string-match-p "Already" (enghi-task-start task)))
+    ;; The picker sees it as working
+    (cl-letf (((symbol-function 'enghi--xwidget-path) (lambda () nil))
+              ((symbol-function 'completing-read)
+               (lambda (_p coll &rest _)
+                 (seq-find (lambda (c) (string-match-p (regexp-quote title) c))
+                           (all-completions "" coll)))))
+      (should (alist-get 'working (enghi-read-task "Task: "))))
+    (let ((buf (enghi-task-log task)))
+      (with-current-buffer buf
+        (insert "Note about " word)
+        (enghi-log-commit)))
+    (let* ((logs (alist-get 'logs (enghi-request "GET" (format "/api/tasks/%d/logs" id))))
+           (note (seq-find (lambda (l) (equal (alist-get 'kind l) "note")) logs)))
+      (should (equal (alist-get 'body note) (concat "Note about " word)))
+      ;; Search finds it and opens the entry
+      (let ((hit (seq-find (lambda (r) (equal (alist-get 'kind r) "log"))
+                           (enghi-search word "log"))))
+        (should (equal (enghi--result-path hit)
+                       (format "/gtd/clarify/%d#log-%d" id (alist-get 'id note)))))
+      ;; Edited elsewhere while open here: the save is refused
+      (let ((buf (enghi-task-log-edit task note)))
+        (unwind-protect
+            (with-current-buffer buf
+              (enghi-request "PATCH" (format "/api/task-logs/%d" (alist-get 'id note))
+                             `((body . "Edited elsewhere") (version . 1)))
+              (erase-buffer)
+              (insert "Edited here")
+              (cl-letf (((symbol-function 'enghi--show-conflict) #'ignore))
+                (should-not (enghi-log-commit)))
+              (should (equal (buffer-string) "Edited here"))
+              (setq enghi-log-version 2)
+              (enghi-log-commit))
+          (when (buffer-live-p buf) (kill-buffer buf))))
+      (should (equal (alist-get 'body (seq-find (lambda (l) (equal (alist-get 'id l) (alist-get 'id note)))
+                                                 (enghi--task-logs task)))
+                     "Edited here"))
+      (should (string-match-p "Paused" (enghi-task-pause task "done for today")))
+      (should (string-match-p "not being worked on" (enghi-task-pause task)))
+      (cl-letf (((symbol-function 'yes-or-no-p) (lambda (_) t))
+                ((symbol-function 'enghi-read-task) (lambda (_) task))
+                ((symbol-function 'completing-read)
+                 (lambda (_p coll &rest _)
+                   (seq-find (lambda (c) (string-match-p "Edited here" c))
+                             (all-completions "" coll)))))
+        (enghi-task-log-delete))
+      (should-not (seq-find (lambda (l) (equal (alist-get 'id l) (alist-get 'id note)))
+                            (enghi--task-logs task))))))

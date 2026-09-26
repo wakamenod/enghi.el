@@ -14,7 +14,7 @@ ELPA_LOAD := --eval '(dolist (d (append (file-expand-wildcards "~/.emacs.d/elpa/
                                         (file-expand-wildcards "~/.config/emacs/elpa/*"))) \
                        (when (file-directory-p d) (add-to-list (quote load-path) d)))'
 
-SRC := enghi.el enghi-consult.el enghi-dashboard.el
+SRC := enghi.el enghi-log.el enghi-consult.el enghi-dashboard.el
 
 .PHONY: test compile clean
 

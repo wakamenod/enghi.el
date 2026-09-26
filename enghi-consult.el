@@ -44,6 +44,7 @@ be small."
     ("project" "Proj")
     ("task" "Task")
     ("area" "Area")
+    ("log" "Log")
     (_ kind)))
 
 (defun enghi-consult--format (result)

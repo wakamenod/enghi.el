@@ -20,6 +20,7 @@ An Emacs client for [enghi](https://github.com/wakamenod/enghi), a local-only wi
 | `markdown-mode` | Optional | Used in page buffers |
 | `consult` | Optional | Used for search on each keystroke |
 | `dashboard` | Optional | For the startup screen section |
+| `browse-at-remote` | Optional | URLs for code links in the work log |
 
 `markdown-mode` and `consult` are optional. Without them, enghi.el uses `fundamental-mode` and `completing-read` search instead.
 
@@ -107,6 +108,11 @@ Press `C-c n n` and enter a title to open a page buffer. Write the body, then sa
 | `o` | `enghi-focus-page` | Focus browser tab on the page |
 | `b` | `enghi-open-in-browser` | Open in browser |
 | `d` | `enghi-browse-dashboard` | Open dashboard (including GTD) |
+| `l` | `enghi-task-log` | Write in a task's work log |
+| `L` | `enghi-task-log-edit` | Edit an entry of a task's work log |
+| `t` | `enghi-task-toggle` | Start or pause a task |
+| `r` | `enghi-code-link` | Log a link to the code at point or the region |
+| `R` | `enghi-code-link-with-comment` | Same as `r`, with a comment added first |
 
 ### Page buffer
 
@@ -169,6 +175,58 @@ If the page changed elsewhere while you were editing, `ediff` opens with the ser
 
 If you rename a page to a title that's already taken, Emacs shows the conflicting page and asks for another title. It keeps the body as is.
 
+## Work log
+
+Each GTD task has a work log. You add timestamped Markdown entries about what you tried, found and decided, and the log also records when you start and pause the task. A task is *working* while its most recent mark is a start. You need a server that supports the work log (newer than v0.2.0).
+
+Each command below first asks for a task. It offers open tasks only, with working tasks first and marked `▶`. If xwidget shows a Clarify page (`/gtd/clarify/…`), that task is the default. Otherwise, if exactly one task is working, that one is.
+
+| Command | |
+|---|---|
+| `enghi-task-log` | Open a buffer for a new entry |
+| `enghi-task-log-edit` | Pick an entry, newest first, and edit it |
+| `enghi-task-log-delete` | Pick an entry and delete it after you confirm |
+| `enghi-task-start` / `enghi-task-pause` | Mark the task as started or paused. With `C-u`, add a one-line comment |
+| `enghi-task-toggle` | Pause a working task, start any other |
+| `enghi-code-link` | Log a link to the code at point or the region |
+| `enghi-code-link-with-comment` | Same, but opens a log buffer first so you can add a comment |
+
+Starting a task that's already working, or pausing one that isn't, changes nothing, and a message says so. If you added a comment, it's still logged as an entry.
+
+### Log buffer
+
+`enghi-log-mode` runs on top of `markdown-mode`, like a page buffer.
+
+| Key | |
+|---|---|
+| `C-c C-c` | Send the entry and close the buffer. With `C-u`, also open the entry in the browser |
+| `C-c C-k` | Discard. Asks first if you wrote something |
+| `C-c C-l` | Select a page and insert `[[link]]` |
+| `C-c C-o` | Open the task's page, at the entry if you're editing one |
+| `C-c C-d` | Delete the entry you're editing |
+
+An entry you haven't sent stays in its buffer, and `C-c n l` on the same task brings it back. If someone changes the entry elsewhere while you edit it, the server version and yours open side by side in `ediff`, as they do for pages.
+
+### Code links
+
+`enghi-code-link` notes where you read code. It can replace org-capture templates that did the same. From any file, it appends an entry like this to the task's log:
+
+````markdown
+[internal/web/server.go L120-134](https://github.com/you/repo/blob/3f2a…/internal/web/server.go#L120-L134)
+
+```go
+func (s *Server) routes() {
+	…
+}
+```
+````
+
+- With a region, the link covers its lines, and the code goes below the link with the common indentation removed. Without a region, the entry links to the current line only.
+- The path is relative to the project (or VC) root. The code block language comes from the major mode (`go-ts-mode` → `go`, `emacs-lisp-mode` → `elisp`).
+- If you have [browse-at-remote](https://github.com/rmuslimov/browse-at-remote) installed, it makes the URL. Set `browse-at-remote-prefer-symbolic` to `nil` to point the link at the commit instead of the branch. Without browse-at-remote, or for a file with no known remote, enghi writes the path and lines as plain text.
+
+Search finds work log entries too. They show as `Log`, and open the task's page at that entry.
+
 ## Browser integration
 
 If you keep a browser open on another display, it can follow what you select in Emacs.
@@ -225,6 +283,7 @@ The number is the most tasks shown in each group. enghi.el itself doesn't need d
 | `enghi-xwidget-padding` | `(24 . 12)` | Padding for `enghi-browse-in-xwidget`, in `(horizontal . vertical)` pixels |
 | `enghi-consult-min-input` | `1` | Number of characters typed before search starts |
 | `enghi-dashboard-timeout` | `2` | How long the startup screen section waits for the server (seconds) |
+| `enghi-code-link-url-function` | `#'enghi--browse-at-remote-url` | Function returning the URL for a code link, or `nil` |
 
 There are no passwords or tokens to set. The server accepts connections from loopback only.
 
@@ -252,6 +311,7 @@ make test
 | File | |
 |---|---|
 | `enghi.el` | API client, page editing, capture, keymaps |
+| `enghi-log.el` | Work log of GTD tasks, code links |
 | `enghi-consult.el` | Search using consult |
 | `enghi-dashboard.el` | Section for the dashboard.el startup screen |
 | `enghi-tests.el` | Tests |
