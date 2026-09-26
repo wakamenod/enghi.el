@@ -116,8 +116,6 @@ git clone https://github.com/wakamenod/enghi.el ~/.emacs.d/site-lisp/enghi.el
 | `r` | `enghi-code-link` | カーソル行やリージョンのコードへのリンクをログに書く |
 | `R` | `enghi-code-link-with-comment` | `r` と同じ。コメントを書き足してから送る |
 
-`C-c n i` の候補には、各リストの件数が出ます。件数を出すには、`/api/lists` に対応したサーバ (v0.3.2 より後) が必要です。
-
 ### ページバッファ
 
 `enghi-page-mode` は `markdown-mode` の上で動きます。バッファの中身はそのままの Markdown です。
