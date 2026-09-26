@@ -868,6 +868,62 @@ The upcoming group is left out, and overdue comes from `deadline_on'."
   (cl-letf (((symbol-function 'read-string) (lambda (&rest _) "tomorrow")))
     (should-error (enghi--read-day-string) :type 'user-error)))
 
+(defmacro enghi-tests--with-gtd-list-read (choice &rest body)
+  "Run `enghi-gtd-list' choosing CHOICE, then BODY.
+BODY sees `browsed', the path opened, `cands', the candidates in display
+order, and `annotate', the annotation function."
+  (declare (indent 1))
+  `(let (browsed cands annotate)
+     (cl-letf (((symbol-function 'enghi-browse) (lambda (path) (setq browsed path)))
+               ((symbol-function 'completing-read)
+                (lambda (_prompt table &rest _)
+                  (let ((sort (completion-metadata-get
+                               (completion-metadata "" table nil)
+                               'display-sort-function)))
+                    (setq cands (funcall sort (all-completions "" table))))
+                  (setq annotate (plist-get completion-extra-properties
+                                            :annotation-function))
+                  ,choice)))
+       (call-interactively #'enghi-gtd-list))
+     ,@body))
+
+(ert-deftest enghi-test-gtd-list ()
+  "`enghi-gtd-list' offers the GTD lists in order, with their counts."
+  (enghi-request "POST" "/api/tasks" `((title . ,(enghi-tests--unique "Listed"))))
+  (let ((inbox (alist-get 'inbox (enghi-request "GET" "/api/lists"))))
+    (should (> inbox 0))
+    (enghi-tests--with-gtd-list-read "Inbox"
+      (should (equal browsed "/gtd/inbox"))
+      (should (equal cands '("Inbox" "Next Actions" "Waiting For" "Scheduled"
+                             "Someday / Maybe" "Projects" "Work Record" "Weekly Review")))
+      (should (string-suffix-p (format " %d" inbox) (funcall annotate "Inbox")))
+      (should (string-suffix-p " today" (funcall annotate "Work Record")))
+      (should-not (funcall annotate "Weekly Review"))
+      ;; The notes end in the same column
+      (should (= (length (delete-dups
+                          (mapcar (lambda (c) (string-width (concat c (funcall annotate c))))
+                                  (butlast cands))))
+                 1))))
+  (enghi-tests--with-gtd-list-read "Weekly Review"
+    (should (equal browsed "/gtd/review")))
+  (should (eq (keymap-lookup enghi-command-map "i") #'enghi-gtd-list)))
+
+(ert-deftest enghi-test-gtd-list-without-counts ()
+  "Servers without /api/lists still get the lists, with no counts."
+  (cl-letf (((symbol-function 'enghi-request)
+             (lambda (_method path &rest _)
+               (should (equal path "/api/lists"))
+               (signal 'enghi-http-error '(404 "not_found")))))
+    (enghi-tests--with-gtd-list-read "Next Actions"
+      (should (equal browsed "/gtd/next"))
+      (should (= (length cands) 8))
+      (should-not (funcall annotate "Inbox"))
+      (should (string-suffix-p " today" (funcall annotate "Work Record")))))
+  ;; A server that does not answer is still an error
+  (cl-letf (((symbol-function 'enghi-request)
+             (lambda (&rest _) (signal 'enghi-error '("Cannot connect")))))
+    (should-error (enghi-tests--with-gtd-list-read "Inbox") :type 'enghi-error)))
+
 (ert-deftest enghi-test-dashboard-section-registered ()
   "Loading dashboard.el registers the `enghi' generator."
   (skip-unless (require 'dashboard nil t))

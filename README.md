@@ -109,11 +109,14 @@ Press `C-c n n` and enter a title to open a page buffer. Write the body, then sa
 | `b` | `enghi-open-in-browser` | Open in browser |
 | `d` | `enghi-browse-dashboard` | Open dashboard (including GTD) |
 | `D` | `enghi-day` | Open today's work record (`C-u`: ask for a day) |
+| `i` | `enghi-gtd-list` | Choose and open a GTD list, such as the Inbox |
 | `l` | `enghi-task-log` | Write in a task's work log |
 | `L` | `enghi-task-log-edit` | Edit an entry of a task's work log |
 | `t` | `enghi-task-toggle` | Start or pause a task |
 | `r` | `enghi-code-link` | Log a link to the code at point or the region |
 | `R` | `enghi-code-link-with-comment` | Same as `r`, with a comment added first |
+
+The candidates of `C-c n i` show how many items each list holds. The counts need a server newer than v0.3.2, which provides `/api/lists`.
 
 ### Page buffer
 
