@@ -35,6 +35,7 @@
 
 ;; Defined in another file. Declared here only to avoid circular requires.
 (declare-function markdown-mode "markdown-mode" ())
+(declare-function yank-media-handler "yank-media" (types handler))
 (declare-function enghi-consult-read-result "enghi-consult" (&optional prompt initial))
 
 (defgroup enghi nil
@@ -146,8 +147,13 @@ non-nil. PARAMS is an alist for the query string."
           (when payload
             ;; url-request-data must be unibyte
             (encode-coding-string (json-encode payload) 'utf-8)))
-         (url (enghi--url (concat path (enghi--encode-query params))))
-         (buffer (url-retrieve-synchronously url t t enghi-request-timeout)))
+         (url (enghi--url (concat path (enghi--encode-query params)))))
+    (enghi--retrieve url)))
+
+(defun enghi--retrieve (url)
+  "Fetch URL synchronously and return the JSON response as an alist.
+The request is described by the dynamically bound `url-request-*' variables."
+  (let ((buffer (url-retrieve-synchronously url t t enghi-request-timeout)))
     (unless buffer
       (signal 'enghi-error
               (list (format "Cannot connect to enghi server: %s.
@@ -157,6 +163,19 @@ Make sure `enghi serve' is running"
       (if (and (>= status 200) (< status 300))
           data
         (enghi--signal-for status data)))))
+
+(defun enghi-upload (data media-type &optional name)
+  "Upload DATA (a unibyte string) as a file of MEDIA-TYPE.
+NAME is the original file name; the server uses it as the alt text.
+Return the server's response, whose `markdown' is ready to insert."
+  (let ((url-request-method "POST")
+        ;; url-http concatenates the headers with the body, so a multibyte
+        ;; header (a symbol name, for example) would make the body multibyte.
+        (url-request-extra-headers
+         `(("Content-Type" . ,(encode-coding-string media-type 'utf-8))))
+        (url-request-data data))
+    (enghi--retrieve
+     (enghi--url (concat "/api/files" (enghi--encode-query `((name . ,name))))))))
 
 (defun enghi-request-async (method path callback &optional payload params)
   "Send an asynchronous request to enghi, calling CALLBACK with JSON on success.
@@ -915,6 +934,7 @@ Check that `enghi serve' is running"
     (define-key map (kbd "C-c C-t") #'enghi-set-tags)
     (define-key map (kbd "C-c C-r") #'enghi-rename-page)
     (define-key map (kbd "C-c C-l") #'enghi-insert-link)
+    (define-key map (kbd "C-c C-i") #'enghi-insert-file)
     map)
   "Keymap for `enghi-page-mode'.")
 
@@ -923,7 +943,8 @@ Check that `enghi serve' is running"
   "Minor mode for editing enghi pages.
 Used on top of `markdown-mode'."
   :lighter " enghi"
-  :keymap enghi-page-mode-map)
+  :keymap enghi-page-mode-map
+  (when enghi-page-mode (enghi--setup-yank-media)))
 
 (defun enghi--markdown-mode ()
   "Enable `markdown-mode' if available.
@@ -1036,6 +1057,53 @@ yet set up (such as bare `emacs -Q' with only load-path added)."
   (interactive (list (enghi--read-page-slug "Link target: ")))
   (let ((page (enghi-page slug)))
     (insert (format "[[%s]]" (alist-get 'title page)))))
+
+;;;; ----------------------------------------------------------------- Files
+
+(defconst enghi-file-media-types
+  '(("png" . "image/png") ("jpg" . "image/jpeg") ("jpeg" . "image/jpeg")
+    ("gif" . "image/gif") ("webp" . "image/webp") ("avif" . "image/avif")
+    ("pdf" . "application/pdf"))
+  "File extensions the server accepts, with their media types.")
+
+(defun enghi--file-media-type (file)
+  "Return the media type for FILE, or signal a `user-error' if unsupported."
+  (or (cdr (assoc (downcase (or (file-name-extension file) ""))
+                  enghi-file-media-types))
+      (user-error "Unsupported file type: %s (use %s)"
+                  (file-name-nondirectory file)
+                  (string-join (mapcar #'car enghi-file-media-types) ", "))))
+
+(defun enghi-insert-file (file)
+  "Upload FILE and insert its Markdown at point.
+Images are inserted as ![name](...), PDFs as [name](...)."
+  (interactive (list (read-file-name "Insert file: " nil nil t)))
+  (let ((type (enghi--file-media-type file))
+        (data (with-temp-buffer
+                (set-buffer-multibyte nil)
+                (insert-file-contents-literally file)
+                (buffer-string))))
+    (insert (alist-get 'markdown
+                       (enghi-upload data type (file-name-nondirectory file))))))
+
+(defun enghi--yank-media-image (type data)
+  "Upload image DATA of TYPE (a symbol such as image/png) and insert it.
+A handler for `yank-media'."
+  (let ((media-type (symbol-name type)))
+    (unless (rassoc media-type enghi-file-media-types)
+      (user-error "Unsupported image type: %s" media-type))
+    (insert (alist-get 'markdown
+                       (enghi-upload (if (multibyte-string-p data)
+                                         (encode-coding-string data 'binary)
+                                       data)
+                                     media-type)))))
+
+(defun enghi--setup-yank-media ()
+  "Let `yank-media' upload images in this buffer (Emacs 29 and later).
+The key is the same as the one `markdown-mode' registers, so this handler
+replaces its handler, which saves images next to a file."
+  (when (fboundp 'yank-media-handler)
+    (yank-media-handler "image/.*" #'enghi--yank-media-image)))
 
 (defun enghi-save ()
   "Save this buffer's contents to the server (PUT with optimistic locking).

@@ -125,8 +125,11 @@ Press `C-c n n` and enter a title to open a page buffer. Write the body, then sa
 | `C-c C-r` | Change title |
 | `C-c C-t` | Edit tags |
 | `C-c C-l` | Select a page and insert `[[link]]` |
+| `C-c C-i` | Upload an image or PDF and insert its Markdown |
 | `C-c C-o` | Open in browser |
 | `C-c C-k` | Revert to server content |
+
+On Emacs 29 or later, `M-x yank-media` uploads an image from the clipboard, such as a screenshot, and inserts it. This works in log buffers too.
 
 You can link to a page that doesn't exist yet, such as `[[non-existent page]]`. The link stays unresolved until you create a page with that name, and then connects automatically.
 
@@ -203,6 +206,7 @@ Starting a task that's already working, or pausing one that isn't, changes nothi
 | `C-c C-c` | Send the entry and close the buffer. With `C-u`, also open the entry in the browser |
 | `C-c C-k` | Discard. Asks first if you wrote something |
 | `C-c C-l` | Select a page and insert `[[link]]` |
+| `C-c C-i` | Upload an image or PDF and insert its Markdown |
 | `C-c C-o` | Open the task's page, at the entry if you're editing one |
 | `C-c C-d` | Delete the entry you're editing |
 
