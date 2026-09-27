@@ -173,6 +173,7 @@ With NOTES-ONLY, leave out the start/pause marks."
     (define-key map (kbd "C-c C-c") #'enghi-log-commit)
     (define-key map (kbd "C-c C-k") #'enghi-log-discard)
     (define-key map (kbd "C-c C-l") #'enghi-insert-link)
+    (define-key map (kbd "C-c C-i") #'enghi-insert-file)
     (define-key map (kbd "C-c C-o") #'enghi-log-browse)
     (define-key map (kbd "C-c C-d") #'enghi-task-log-delete)
     map)
@@ -185,7 +186,8 @@ Used on top of `markdown-mode'.
 
 \\{enghi-log-mode-map}"
   :lighter " enghi-log"
-  :keymap enghi-log-mode-map)
+  :keymap enghi-log-mode-map
+  (when enghi-log-mode (enghi--setup-yank-media)))
 
 (defun enghi--log-buffer-name (title &optional log-id)
   "Return the buffer name for a new entry of TITLE, or for editing LOG-ID."
@@ -200,7 +202,7 @@ Used on top of `markdown-mode'.
                     (format "%s  (editing v%s)" enghi-log-task-title enghi-log-version)
                   (format "Log: %s" enghi-log-task-title))
                 (propertize (concat "  C-c C-c " (if enghi-log-id "Save" "Log")
-                                    "  C-c C-k Discard  C-c C-l Link  C-c C-o Open"
+                                    "  C-c C-k Discard  C-c C-l Link  C-c C-i File  C-c C-o Open"
                                     (if enghi-log-id "  C-c C-d Delete" ""))
                             'face 'shadow))))
 

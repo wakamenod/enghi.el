@@ -1375,3 +1375,66 @@ A leaf or use-package `:bind' then needs no autoload of its own."
         (enghi-task-log-delete))
       (should-not (seq-find (lambda (l) (equal (alist-get 'id l) (alist-get 'id note)))
                             (enghi--task-logs task))))))
+
+;;;; Files
+
+(defconst enghi-tests--png
+  (unibyte-string #x89 #x50 #x4e #x47 #x0d #x0a #x1a #x0a
+                  #x00 #x00 #x00 #x0d #x49 #x48 #x44 #x52
+                  #x00 #x00 #x00 #x01 #x00 #x00 #x00 #x01
+                  #x08 #x06 #x00 #x00 #x00 #x1f #x15 #xc4 #x89
+                  #x00 #x00 #x00 #x0d #x49 #x44 #x41 #x54
+                  #x78 #x9c #x63 #x60 #x60 #x60 #xf8 #x0f #x00 #x01 #x04 #x01 #x00
+                  #x5f #xe5 #xc3 #x4b
+                  #x00 #x00 #x00 #x00 #x49 #x45 #x4e #x44 #xae #x42 #x60 #x82)
+  "A 1x1 PNG. Its bytes include ones above 127, so it breaks if sent multibyte.")
+
+(ert-deftest enghi-test-insert-file ()
+  "Upload a PNG from a file and insert its Markdown at point."
+  (let ((file (make-temp-file "enghi-test" nil ".png")))
+    (unwind-protect
+        (progn
+          (let ((coding-system-for-write 'binary))
+            (write-region enghi-tests--png nil file nil 'silent))
+          (with-temp-buffer
+            (insert "before ")
+            (enghi-insert-file file)
+            ;; Files are stored by content, so the alt text is the name the
+            ;; first upload gave
+            (should (string-match "\\`before !\\[[^]]+\\](\\(/files/[^)]+\\))\\'"
+                                  (buffer-string)))
+            ;; The server stored the bytes unchanged
+            (let ((url-request-method "GET")
+                  (buf (url-retrieve-synchronously
+                        (enghi--url (match-string 1 (buffer-string))) t t 10)))
+              (unwind-protect
+                  (with-current-buffer buf
+                    (goto-char (point-min))
+                    (re-search-forward "\n\r?\n")
+                    (should (equal (buffer-substring (point) (point-max))
+                                   enghi-tests--png)))
+                (kill-buffer buf)))))
+      (delete-file file))))
+
+(ert-deftest enghi-test-insert-file-unsupported ()
+  "Refuse an unsupported file type before sending it."
+  (let ((file (make-temp-file "enghi-test" nil ".svg" "<svg/>")))
+    (unwind-protect
+        (cl-letf (((symbol-function 'enghi-upload)
+                   (lambda (&rest _) (error "Should not be sent"))))
+          (with-temp-buffer
+            (should-error (enghi-insert-file file) :type 'user-error)
+            (should (equal (buffer-string) ""))))
+      (delete-file file))))
+
+(ert-deftest enghi-test-yank-media-image ()
+  "The `yank-media' handler uploads the image and inserts its Markdown."
+  (with-temp-buffer
+    (enghi-page-mode 1)
+    (when (fboundp 'yank-media-handler)
+      (should (eq (alist-get "image/.*" yank-media--registered-handlers nil nil #'equal)
+                  #'enghi--yank-media-image)))
+    (enghi--yank-media-image 'image/png enghi-tests--png)
+    (should (string-match-p "\\`!\\[[^]]*\\](/files/[^)]+)\\'" (buffer-string)))
+    (should-error (enghi--yank-media-image 'image/svg+xml "<svg/>")
+                  :type 'user-error)))
