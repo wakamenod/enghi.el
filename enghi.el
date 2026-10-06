@@ -906,6 +906,27 @@ The amount of padding can be changed with `enghi-xwidget-padding'."
       (enghi-xwidget-mode 1)
       (enghi--xwidget-pad session))))
 
+;;;; -------------------------------------------------------------- posframe
+;;
+;; The task lists (enghi-triage.el) and the web peek (enghi-peek.el) can show
+;; in a posframe. They share its look; posframe itself is loaded only there.
+
+(defcustom enghi-posframe-border-width 1
+  "Border width of enghi's posframes, in pixels."
+  :type 'integer
+  :group 'enghi)
+
+(defface enghi-posframe-border
+  '((t :background "gray50"))
+  "Face whose background is the border color of enghi's posframes."
+  :group 'enghi)
+
+(defun enghi--posframe-look ()
+  "Return the `posframe-show' arguments giving enghi's posframes their look."
+  (list :border-width enghi-posframe-border-width
+        :border-color (face-background 'enghi-posframe-border nil t)
+        :left-fringe 8 :right-fringe 8))
+
 ;;;; ---------------------------------------------------------------- focus
 
 (defun enghi-focus (path)
@@ -1195,14 +1216,23 @@ If 409 is returned, handle it differently depending on the type (DESIGN.md
 
 ;;;; ---------------------------------------------------------------- capture
 
+;; Tidying with Claude lives in enghi-tidy.el, loaded on the first capture
+(declare-function enghi--tidy-available-p "enghi-tidy" ())
+(declare-function enghi-tidy-task "enghi-tidy" (task original))
+
 ;;;###autoload
 (defun enghi-capture (title)
-  "Add TITLE to the GTD Inbox as a single line, usable from anywhere."
+  "Add TITLE to the GTD Inbox as a single line, usable from anywhere.
+With the Claude Code CLI installed, the item is then tidied in the
+background (see `enghi-capture-tidy')."
   (interactive "sTo Inbox: ")
   (when (string-empty-p (string-trim title))
     (user-error "Cannot add an empty item"))
-  (let ((task (enghi-request "POST" "/api/tasks" `((title . ,title)))))
-    (message "Added to Inbox: %s" (alist-get 'title task))
+  (let ((task (enghi-request "POST" "/api/tasks" `((title . ,title))))
+        (tidy (and (require 'enghi-tidy nil t) (enghi--tidy-available-p))))
+    (message "Added to Inbox: %s%s" (alist-get 'title task) (if tidy " (tidying…)" ""))
+    (when tidy
+      (enghi-tidy-task task (string-trim title)))
     task))
 
 ;;;###autoload
@@ -1243,6 +1273,9 @@ The first line becomes the title, the rest becomes the note."
 (autoload 'enghi--task-start-now "enghi-log")
 ;; Sorting tasks from Emacs lives in enghi-triage.el
 (autoload 'enghi-task-list "enghi-triage" nil t)
+;; Peeking at web screens in a posframe lives in enghi-peek.el
+(autoload 'enghi-peek-dashboard "enghi-peek" nil t)
+(autoload 'enghi-peek-working "enghi-peek" nil t)
 
 (defvar enghi-command-map
   (let ((map (make-sparse-keymap)))
@@ -1251,11 +1284,13 @@ The first line becomes the title, the rest becomes the note."
     (define-key map (kbd "c") #'enghi-capture)
     (define-key map (kbd "b") #'enghi-open-in-browser)
     (define-key map (kbd "o") #'enghi-focus-page)
-    (define-key map (kbd "d") #'enghi-browse-dashboard)
     (define-key map (kbd "D") #'enghi-day)
     (define-key map (kbd "i") #'enghi-gtd-list)
     ;; Sorting tasks (enghi-triage.el)
     (define-key map (kbd "p") #'enghi-task-list)
+    ;; Peeking at web screens (enghi-peek.el)
+    (define-key map (kbd "d") #'enghi-peek-dashboard)
+    (define-key map (kbd "w") #'enghi-peek-working)
     (define-key map (kbd "n") #'enghi-new-page)
     ;; Work log (enghi-log.el)
     (define-key map (kbd "l") #'enghi-task-log)

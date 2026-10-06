@@ -40,8 +40,10 @@
 (defcustom enghi-triage-display 'echo-area
   "Where the task list and the action keys show.
 `echo-area', or `posframe' for a child frame placed by
-`enghi-triage-posframe-poshandler'. `posframe' needs the posframe package
-and a graphical frame; without them the echo area is used."
+`enghi-triage-posframe-poshandler', with the look of
+`enghi-posframe-border-width' and `enghi-posframe-border'. `posframe' needs
+the posframe package and a graphical frame; without them the echo area is
+used."
   :type '(choice (const :tag "Echo area" echo-area)
                  (const :tag "Child frame (posframe)" posframe))
   :group 'enghi)
@@ -49,16 +51,6 @@ and a graphical frame; without them the echo area is used."
 (defcustom enghi-triage-posframe-poshandler #'posframe-poshandler-frame-center
   "Function placing the posframe; see `posframe-show'."
   :type 'function
-  :group 'enghi)
-
-(defcustom enghi-triage-posframe-border-width 1
-  "Border width of the posframe, in pixels."
-  :type 'integer
-  :group 'enghi)
-
-(defface enghi-triage-posframe-border
-  '((t :background "gray50"))
-  "Face whose background is the border color of the posframe."
   :group 'enghi)
 
 (defcustom enghi-task-list-height 15
@@ -136,11 +128,9 @@ The keys in `enghi--triage-first-row' go first, the others below."
     (let ((inhibit-read-only t))
       (erase-buffer)
       (insert menu)))
-  (posframe-show enghi--triage-buffer
-                 :poshandler enghi-triage-posframe-poshandler
-                 :border-width enghi-triage-posframe-border-width
-                 :border-color (face-background 'enghi-triage-posframe-border nil t)
-                 :left-fringe 8 :right-fringe 8))
+  (apply #'posframe-show enghi--triage-buffer
+         :poshandler enghi-triage-posframe-poshandler
+         (enghi--posframe-look)))
 
 (defun enghi--triage-hide ()
   "Hide the posframe, if it is there."

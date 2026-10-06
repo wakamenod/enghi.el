@@ -21,6 +21,8 @@ An Emacs client for [enghi](https://github.com/wakamenod/enghi), a local-only wi
 | `consult` | Optional | Used for search on each keystroke |
 | `dashboard` | Optional | For the startup screen section |
 | `browse-at-remote` | Optional | URLs for code links in the work log |
+| `posframe` | Optional | Task lists in a posframe; needed to peek at web screens |
+| [Claude Code](https://claude.com/claude-code) (`claude`) | Optional | Tidies items captured to the Inbox |
 
 `markdown-mode` and `consult` are optional. Without them, enghi.el uses `fundamental-mode` and `completing-read` search instead.
 
@@ -107,10 +109,11 @@ Press `C-c n n` and enter a title to open a page buffer. Write the body, then sa
 | `c` | `enghi-capture` | Send a line to Inbox |
 | `o` | `enghi-focus-page` | Focus browser tab on the page |
 | `b` | `enghi-open-in-browser` | Open in browser |
-| `d` | `enghi-browse-dashboard` | Open dashboard (including GTD) |
 | `D` | `enghi-day` | Open today's work record (`C-u`: ask for a day) |
 | `i` | `enghi-gtd-list` | Choose and open a GTD list, such as the Inbox |
 | `p` | `enghi-task-list` | Show the GTD lists and act on their tasks with one key |
+| `d` | `enghi-peek-dashboard` | Peek at the web dashboard over the frame |
+| `w` | `enghi-peek-working` | Peek at the task you're working on, at its latest log entry |
 | `l` | `enghi-task-log` | Write in a task's work log |
 | `L` | `enghi-task-log-edit` | Edit an entry of a task's work log |
 | `t` | `enghi-task-toggle` | Start or pause a task |
@@ -177,6 +180,20 @@ When you save with `C-c C-c`, the server sends the update to every connected cli
 
 Updates go out only when you save, not while you type.
 
+## Tidy captured items with Claude
+
+If the Claude Code CLI (`claude`) is installed and logged in, `C-c n c` tidies what you capture. The item goes into the Inbox as typed, right away. Then `claude -p` turns it into a short title, a note with the details and the URL in it, and the item is updated, usually 10 to 30 seconds later:
+
+```
+Typed:  next week dentist call to book 03-1234-5678 morning
+Title:  Call the dentist to book
+Note:   Next week, in the morning, 03-1234-5678
+
+        Captured as: next week dentist call to book 03-1234-5678 morning
+```
+
+You don't wait for it: Emacs stays usable while Claude works. The line as typed stays at the end of the note. If you change the item before Claude answers, or Claude fails, the item stays as captured and a message says so. Claude runs with Haiku (`enghi-capture-tidy-model`), without tools, MCP servers or your settings. Set `enghi-capture-tidy` to `nil` to turn it off.
+
 ## Sort tasks in Emacs
 
 `C-c n p` (`enghi-task-list`) shows the GTD lists and lets you act on their tasks with one key. Nothing takes a window: the lists show in the echo area, or in a posframe (see below).
@@ -204,11 +221,30 @@ If your completion UI is in a posframe (vertico-posframe, for instance), the lis
 ```elisp
 (setq enghi-triage-display 'posframe)
 ;; Optional: match vertico-posframe's look
-(setq enghi-triage-posframe-border-width 5)
-(set-face-background 'enghi-triage-posframe-border "#323445")
+(setq enghi-posframe-border-width 5)
+(set-face-background 'enghi-posframe-border "#323445")
 ```
 
 `enghi-triage-posframe-poshandler` places it, in the middle of the frame by default, and `enghi-task-list-height` sets how many tasks show at a time (15). Without posframe or a graphical frame, the lists stay in the echo area.
+
+## Peek at web screens
+
+`C-c n d` (`enghi-peek-dashboard`) shows the web dashboard over the middle of the frame, and `C-c n w` (`enghi-peek-working`) the Clarify page of the task you're working on, scrolled to its latest log entry. The page is the web screen itself, so diagrams and code in the work log render as in the browser. Nothing takes a window. This needs posframe and an Emacs built with xwidgets.
+
+| Key | |
+|---|---|
+| `j` / `k` | Scroll (also `C-n`/`C-p` and the arrow keys) |
+| `SPC` / `S-SPC` | Scroll a page (also `C-v`/`M-v` and `DEL`) |
+| `<` / `>` | Top / bottom of the page |
+| `d` / `w` | Show the dashboard / the task you're working on |
+| `r` | Reload |
+| `E` | Close, and open the page in a window (`enghi-browse-in-xwidget`) |
+| `o` | Close, and open the page in the browser |
+| `q` | Close |
+
+Any other key closes the peek and does what it does. The page follows changes by itself, so a log entry you add shows up while the peek is open. The view is kept, so the next peek opens quickly.
+
+The peek takes `enghi-peek-size` of the frame, `(0.8 . 0.85)` by default, and `enghi-peek-poshandler` places it. It has the same border as the task lists.
 
 ## Save conflicts
 
@@ -336,7 +372,12 @@ The number is the most lines shown in each group. enghi.el itself doesn't need d
 | `enghi-xwidget-padding` | `(24 . 12)` | Padding for `enghi-browse-in-xwidget`, in `(horizontal . vertical)` pixels |
 | `enghi-consult-min-input` | `1` | Number of characters typed before search starts |
 | `enghi-dashboard-timeout` | `2` | How long the startup screen section waits for the server (seconds) |
-| `enghi-triage-display` | `echo-area` | Where the triage menu shows: `echo-area` or `posframe` |
+| `enghi-triage-display` | `echo-area` | Where the task lists show: `echo-area` or `posframe` |
+| `enghi-posframe-border-width` | `1` | Border width of the posframes (pixels). The color is the background of the `enghi-posframe-border` face |
+| `enghi-peek-size` | `(0.8 . 0.85)` | Size of the peek, as fractions of the frame's width and height |
+| `enghi-capture-tidy` | `t` | Tidy captured items with Claude when `claude` is found |
+| `enghi-claude-program` | `"claude"` | The Claude Code CLI |
+| `enghi-capture-tidy-model` | `"haiku"` | Model that tidies captured items |
 | `enghi-code-link-url-function` | `#'enghi--browse-at-remote-url` | Function returning the URL for a code link, or `nil` |
 
 There are no passwords or tokens to set. The server accepts connections from loopback only.
@@ -366,7 +407,9 @@ make test
 |---|---|
 | `enghi.el` | API client, page editing, capture, keymaps |
 | `enghi-log.el` | Work log of GTD tasks, code links |
-| `enghi-triage.el` | Sorting tasks from the echo area |
+| `enghi-triage.el` | Task lists for sorting tasks, in the echo area or a posframe |
+| `enghi-peek.el` | Web screens in a posframe |
+| `enghi-tidy.el` | Tidying captured items with Claude |
 | `enghi-consult.el` | Search using consult |
 | `enghi-dashboard.el` | Section for the dashboard.el startup screen |
 | `enghi-tests.el` | Tests |
