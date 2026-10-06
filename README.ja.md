@@ -21,6 +21,7 @@
 | `consult` | 任意 | キー入力ごとの検索で使用 |
 | `dashboard` | 任意 | 起動画面の欄で使用 |
 | `browse-at-remote` | 任意 | 作業ログに書くコードリンクの URL に使用 |
+| `posframe` | 任意 | タスクのリストを posframe に出すときに使用。web 画面の表示には必要 |
 
 `markdown-mode` と `consult` はなくても動きます。ない場合は、それぞれ `fundamental-mode` と `completing-read` による検索を使います。
 
@@ -107,10 +108,11 @@ git clone https://github.com/wakamenod/enghi.el ~/.emacs.d/site-lisp/enghi.el
 | `c` | `enghi-capture` | Inbox へ1行送信 |
 | `o` | `enghi-focus-page` | ブラウザのタブで該当ページを表示 |
 | `b` | `enghi-open-in-browser` | ブラウザで開く |
-| `d` | `enghi-browse-dashboard` | ダッシュボード (GTD 含む) を開く |
 | `D` | `enghi-day` | 今日の作業記録を開く (`C-u` で日付を指定) |
 | `i` | `enghi-gtd-list` | Inbox などの GTD リストを選んで開く |
 | `p` | `enghi-task-list` | GTD のリストを表示し、タスクを1キーで仕分ける |
+| `d` | `enghi-peek-dashboard` | web のダッシュボードをフレームの上に表示 |
+| `w` | `enghi-peek-working` | 作業中のタスクを最新の作業ログの位置で表示 |
 | `l` | `enghi-task-log` | タスクの作業ログを書く |
 | `L` | `enghi-task-log-edit` | 作業ログの記録を編集する |
 | `t` | `enghi-task-toggle` | タスクを開始・中断する |
@@ -204,11 +206,30 @@ vertico-posframe などで補完を posframe に出している場合は、リ�
 ```elisp
 (setq enghi-triage-display 'posframe)
 ;; 任意: vertico-posframe と見た目を揃える
-(setq enghi-triage-posframe-border-width 5)
-(set-face-background 'enghi-triage-posframe-border "#323445")
+(setq enghi-posframe-border-width 5)
+(set-face-background 'enghi-posframe-border "#323445")
 ```
 
 位置は `enghi-triage-posframe-poshandler` で決まり、既定ではフレームの中央です。一度に出すタスクの数は `enghi-task-list-height` (既定 15) で変えられます。posframe がない場合や、グラフィカルなフレームでない場合は、エコーエリアに出ます。
+
+## web 画面を posframe で見る
+
+`C-c n d` (`enghi-peek-dashboard`) は、web のダッシュボードをフレームの中央に重ねて表示します。`C-c n w` (`enghi-peek-working`) は、作業中のタスクの Clarify ページを、最新の作業ログまでスクロールして表示します。web 画面そのものなので、作業ログのダイアグラムやコードもブラウザと同じように表示されます。ウィンドウは使いません。posframe と、xwidgets 付きでビルドした Emacs が必要です。
+
+| キー | |
+|---|---|
+| `j` / `k` | スクロール (`C-n`/`C-p` や矢印キーも可) |
+| `SPC` / `S-SPC` | 1画面ずつスクロール (`C-v`/`M-v` や `DEL` も可) |
+| `<` / `>` | ページの先頭 / 末尾 |
+| `d` / `w` | ダッシュボード / 作業中のタスクを表示 |
+| `r` | 再読み込み |
+| `E` | 閉じて、ページをウィンドウで開く (`enghi-browse-in-xwidget`) |
+| `o` | 閉じて、ページをブラウザで開く |
+| `q` | 閉じる |
+
+ほかのキーを押すと閉じて、そのキー本来の操作をします。ページは変更に自動で追従するので、開いている間に書いた作業ログもすぐ表示されます。表示は使い回すので、2回目からは速く開きます。
+
+大きさは `enghi-peek-size` (既定 `(0.8 . 0.85)`、フレームに対する割合)、位置は `enghi-peek-poshandler` で決まります。枠はタスクのリストと共通です。
 
 ## 保存の競合
 
@@ -336,7 +357,9 @@ enghi:
 | `enghi-xwidget-padding` | `(24 . 12)` | `enghi-browse-in-xwidget` の余白 (`(horizontal . vertical)` ピクセル) |
 | `enghi-consult-min-input` | `1` | 検索開始に必要な入力文字数 |
 | `enghi-dashboard-timeout` | `2` | 起動画面の欄がサーバの応答を待つ時間 (秒) |
-| `enghi-triage-display` | `echo-area` | 仕分けメニューを出す場所。`echo-area` か `posframe` |
+| `enghi-triage-display` | `echo-area` | タスクのリストを出す場所。`echo-area` か `posframe` |
+| `enghi-posframe-border-width` | `1` | posframe の枠の幅 (ピクセル)。色は face `enghi-posframe-border` の背景色 |
+| `enghi-peek-size` | `(0.8 . 0.85)` | web 画面を表示する posframe の大きさ。フレームの幅と高さに対する割合 |
 | `enghi-code-link-url-function` | `#'enghi--browse-at-remote-url` | コードリンクの URL を返す関数。URL がなければ `nil` を返す |
 
 パスワードやトークンの設定は不要です。サーバはループバックからの接続だけを受け付けます。
@@ -366,7 +389,8 @@ make test
 |---|---|
 | `enghi.el` | API クライアント、ページ編集、キャプチャ、キーマップ |
 | `enghi-log.el` | GTD タスクの作業ログ、コードリンク |
-| `enghi-triage.el` | エコーエリアからのタスクの仕分け |
+| `enghi-triage.el` | タスクを仕分けるリスト (エコーエリアか posframe) |
+| `enghi-peek.el` | web 画面を posframe で表示 |
 | `enghi-consult.el` | consult による検索 |
 | `enghi-dashboard.el` | dashboard.el の起動画面に出す欄 |
 | `enghi-tests.el` | テスト |

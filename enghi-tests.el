@@ -1608,6 +1608,71 @@ PATH PAYLOAD), oldest first, `prompts' to what was shown, newest first, and
     (should (equal (alist-get 'state (funcall get b)) "next"))
     (should (equal (alist-get 'project_id (funcall get b)) (alist-get 'id project)))))
 
+;;;; Peeking at web screens
+
+(require 'enghi-peek)
+
+(ert-deftest enghi-test-peek-working-path ()
+  "The working task opens at its latest note, or at its log without one."
+  (let (logs working)
+    (cl-letf (((symbol-function 'enghi-request)
+               (lambda (_method path &rest _)
+                 (pcase path
+                   ("/api/dashboard" `((gtd (working ,@working))))
+                   ("/api/tasks/7/logs" `((logs ,@logs)))))))
+      (should-not (enghi--peek-working-path))
+      (setq working '(((id . 7) (title . "Write report"))))
+      (should (equal (enghi--peek-working-path) "/gtd/clarify/7#log"))
+      (setq logs '(((id . 1) (kind . "note")) ((id . 2) (kind . "note"))
+                   ((id . 3) (kind . "start"))))
+      (should (equal (enghi--peek-working-path) "/gtd/clarify/7#log-2")))))
+
+(ert-deftest enghi-test-peek-commands ()
+  "The commands open their page, and say so when nothing is being worked on."
+  (let ((enghi-server-url "http://127.0.0.1:7777") opened)
+    (cl-letf (((symbol-function 'enghi--peek-check) #'ignore)
+              ((symbol-function 'enghi--ensure-server) #'ignore)
+              ((symbol-function 'enghi--peek-open) (lambda (url) (push url opened)))
+              ((symbol-function 'enghi--peek-working-path) (lambda () "/gtd/clarify/7#log-2")))
+      (enghi-peek-dashboard)
+      (enghi-peek-working)
+      (should (equal opened '("http://127.0.0.1:7777/gtd/clarify/7#log-2"
+                              "http://127.0.0.1:7777/")))
+      (cl-letf (((symbol-function 'enghi--peek-working-path) #'ignore))
+        (should-error (enghi-peek-working) :type 'user-error)))))
+
+(ert-deftest enghi-test-peek-keys ()
+  "The peek reads its keys, scrolls with scripts and closes on q."
+  (should (eq (lookup-key enghi-command-map "d") #'enghi-peek-dashboard))
+  (should (eq (lookup-key enghi-command-map "w") #'enghi-peek-working))
+  (should (eq (lookup-key enghi-peek-map "j") #'enghi-peek-forward))
+  (should (eq (lookup-key enghi-peek-map " ") #'enghi-peek-page-forward))
+  (should (eq (lookup-key enghi-peek-map "q") #'enghi-peek-close))
+  (let ((enghi--peek-xwidget 'view) (enghi-peek-scroll-step 80) scripts exited hidden)
+    (cl-letf (((symbol-function 'xwidget-webkit-execute-script)
+               (lambda (view script &rest _) (should (eq view 'view)) (push script scripts)))
+              ((symbol-function 'posframe-hide) (lambda (_) (setq hidden t))))
+      (enghi-peek-forward)
+      (enghi-peek-backward)
+      (should (equal scripts '("window.scrollBy(0, -80);" "window.scrollBy(0, 80);")))
+      ;; q ends the keymap too, so the next j is not swallowed
+      (let ((enghi--peek-exit (lambda () (setq exited t))))
+        (get-buffer-create enghi--peek-buffer-name)
+        (enghi-peek-close)
+        (should exited)
+        (should hidden)
+        (should-not enghi--peek-exit)))))
+
+(ert-deftest enghi-test-peek-working-path-live ()
+  "The working task's page opens at the note written last."
+  (let* ((task (enghi-capture (enghi-tests--unique "Peek target")))
+         (id (alist-get 'id task)))
+    (enghi-task-start task)
+    (let ((note (alist-get 'log (enghi-request "POST" (format "/api/tasks/%d/logs" id)
+                                               '((body . "Decided the plan")))))
+          (path (enghi--peek-working-path)))
+      (should (equal path (format "/gtd/clarify/%d#log-%d" id (alist-get 'id note)))))))
+
 ;;;; Files
 
 (defconst enghi-tests--png
