@@ -317,8 +317,11 @@ first. GETs answer with a few projects, contexts and tags."
                 (lambda (method path &optional payload _params)
                   (setq requests (append requests (list (list method path payload))))
                   (pcase path
-                    ("/api/projects" '((projects ((id . 7) (title . "Garden"))
-                                                 ((id . 8) (title . "House")))))
+                    ("/api/projects"
+                     (if (equal method "POST")
+                         `((id . 9) (title . ,(alist-get 'title payload)))
+                       '((projects ((id . 7) (title . "Garden"))
+                                   ((id . 8) (title . "House"))))))
                     ("/api/contexts" '((contexts ((id . 3) (name . "@home"))
                                                  ((id . 4) (name . "@old") (archived . t)))))
                     ("/api/tags" '((tags ((name . "notes") (count . 1)))))
@@ -369,6 +372,30 @@ first. GETs answer with a few projects, contexts and tags."
     (should (equal (enghi-tests--writes requests)
                    '(("PATCH" "/api/tasks/42"
                       ((state . "next") (clear_project . t) (context_id . 3))))))))
+
+(ert-deftest enghi-test-task-next-new-project ()
+  "A project name not in the list creates the project, after confirming."
+  (enghi-tests--with-task-action (enghi-tests--row)
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (_prompt _cands _pred require-match &rest _)
+                 ;; Any name may be typed
+                 (should-not require-match)
+                 " Move house "))
+              ((symbol-function 'y-or-n-p)
+               (lambda (prompt) (should (equal prompt "Create project \"Move house\"? ")) t))
+              ((symbol-function 'read-string) (lambda (&rest _) "Living in the new place ")))
+      (enghi-tests--press ?n))
+    (should (equal (enghi-tests--writes requests)
+                   '(("POST" "/api/projects"
+                      ((title . "Move house") (outcome . "Living in the new place")))
+                     ("PATCH" "/api/tasks/42" ((state . "next") (project_id . 9)))))))
+  ;; Declined: nothing is created or moved
+  (enghi-tests--with-task-action (enghi-tests--row)
+    (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) "Move house"))
+              ((symbol-function 'y-or-n-p) (lambda (_) nil)))
+      (enghi-tests--press ?l))
+    (should-not (enghi-tests--writes requests))
+    (should-not scripts)))
 
 (ert-deftest enghi-test-task-later ()
   "`l' needs a project."
@@ -553,6 +580,32 @@ first. GETs answer with a few projects, contexts and tags."
     (let ((after (alist-get 'task (enghi-request "GET" (format "/api/tasks/%d" (alist-get 'id task))))))
       (should (equal (alist-get 'state after) "next"))
       (should (equal (alist-get 'project_id after) (alist-get 'id project))))))
+
+(ert-deftest enghi-test-task-start-now ()
+  "`.' moves a task to Next, asking for its project, then starts it."
+  (should (eq (lookup-key enghi-xwidget-mode-map ".") #'enghi-xwidget-key))
+  (enghi-tests--with-task-action (enghi-tests--row)
+    (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) "House")))
+      (enghi-tests--press ?.))
+    (should (equal (enghi-tests--writes requests)
+                   '(("PATCH" "/api/tasks/42" ((state . "next") (project_id . 8)))
+                     ("POST" "/api/tasks/42/logs" ((kind . "start") (body . ""))))))
+    (should (string-match-p "location.reload" (car scripts))))
+  ;; Already in Next: no question and no move
+  (enghi-tests--with-task-action (enghi-tests--row :state "next")
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (&rest _) (error "Should not ask"))))
+      (enghi-tests--press ?.))
+    (should (equal (enghi-tests--writes requests)
+                   '(("POST" "/api/tasks/42/logs" ((kind . "start") (body . "")))))))
+  ;; A scheduled task whose date has come is a next action already: it keeps
+  ;; its date. One in the future moves to Next.
+  (dolist (case `((,(format-time-string "%F") . nil) ("2000-01-01" . nil) ("2999-01-01" . t)))
+    (enghi-tests--with-task-action
+        (enghi-tests--row :state "scheduled" :scheduled_on (car case))
+      (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) "House")))
+        (enghi-tests--press ?.))
+      (should (equal (and (assoc "PATCH" (enghi-tests--writes requests)) t) (cdr case))))))
 
 (ert-deftest enghi-test-xwidget-callbacks-held ()
   "Script callbacks are held until WebKit calls them (macOS does not)."
@@ -1164,6 +1217,31 @@ The only working task is the default, and same titles stay apart."
                        ((kind . "pause") (body . "lunch")) ((kind . "pause") (body . ""))
                        ((kind . "pause") (body . ""))))))))
 
+(ert-deftest enghi-test-log-start-names-paused ()
+  "A start names the tasks the server paused to make way for it."
+  (enghi-tests--with-log-server
+      (lambda (&rest _) '((log (kind . "start")) (created . t) (working . t)
+                          (paused ((id . 5) (title . "Old task"))
+                                  ((id . 6) (title . "Older task")))))
+    (should (equal (enghi-task-start '((id . 2) (title . "Fix bug")))
+                   "▶ Started: Fix bug (⏸ Paused: Old task, Older task)"))))
+
+(ert-deftest enghi-test-log-picker-groups ()
+  "The picker groups the tasks: the working ones, then each list."
+  (enghi-tests--with-log-server #'ignore
+    (let (group)
+      (cl-letf (((symbol-function 'completing-read)
+                 (lambda (_p coll &rest _)
+                   (setq group (alist-get 'group-function
+                                          (cdr (funcall coll "" nil 'metadata))))
+                   "  Call Bob")))
+        (enghi-read-task "Task: "))
+      (should (equal (mapcar (lambda (c) (funcall group c nil))
+                             '("▶ Fix bug  (enghi)" "  Write report" "  Call Bob"
+                               "  Write report  #4"))
+                     '("Working" "Next Actions" "Inbox" "Someday / Maybe")))
+      (should (equal (funcall group "  Call Bob" t) "  Call Bob")))))
+
 (ert-deftest enghi-test-log-keys ()
   "The work log commands are on the command map."
   (should (eq (lookup-key enghi-command-map "l") #'enghi-task-log))
@@ -1375,6 +1453,160 @@ A leaf or use-package `:bind' then needs no autoload of its own."
         (enghi-task-log-delete))
       (should-not (seq-find (lambda (l) (equal (alist-get 'id l) (alist-get 'id note)))
                             (enghi--task-logs task))))))
+
+;;;; Sorting from Emacs
+
+(require 'enghi-triage)
+
+(defvar enghi-tests--contexts nil
+  "Whether the stubbed server has contexts on.")
+
+(defvar enghi-tests--lists
+  '(("inbox"
+     ((id . 2) (title . "Second") (state . "inbox") (created_at . "2026-10-02 00:00:00"))
+     ((id . 1) (title . "First") (state . "inbox") (created_at . "2026-10-01 00:00:00"))
+     ((id . 3) (title . "Third") (state . "inbox") (created_at . "2026-10-03 00:00:00")))
+    ("next"
+     ((id . 5) (title . "Fix bug") (state . "next") (working . t) (project_title . "enghi")))
+    ("waiting"
+     ((id . 6) (title . "Reply") (state . "waiting") (waiting_for . "Bob"))))
+  "Tasks per state on the stubbed server. The Inbox is not oldest first.")
+
+(defmacro enghi-tests--with-triage (keys &rest body)
+  "Run BODY with the server stubbed and KEYS read by `read-key', in order.
+Bind `requests' to the requests made but the lists and settings, as (METHOD
+PATH PAYLOAD), oldest first, `prompts' to what was shown, newest first, and
+`browsed' to the path given to `enghi-browse'."
+  (declare (indent 1))
+  `(let ((requests nil) (prompts nil) (browsed nil) (keys ,keys))
+     (cl-letf (((symbol-function 'enghi-request)
+                (lambda (method path &optional payload params)
+                  (pcase path
+                    ("/api/settings" `((contexts . ,enghi-tests--contexts)))
+                    ("/api/tasks"
+                     (let ((state (alist-get 'state params)))
+                       ;; The Next list asks for the Next Actions list
+                       `((tasks ,@(cdr (assoc (if (equal state "next_actions") "next" state)
+                                              enghi-tests--lists))))))
+                    (_
+                     (setq requests (append requests (list (list method path payload))))
+                     (pcase path
+                       ("/api/projects" '((projects ((id . 7) (title . "Garden")))))
+                       ("/api/contexts" '((contexts ((id . 3) (name . "@home")))))
+                       ((rx "/api/tasks/" (let id (+ digit)) eos)
+                        `((task (id . ,(string-to-number id)) (title . "Renamed")
+                                (state . "inbox"))))
+                       ((rx "/logs" eos) '((log (kind . "start")) (created . t)))
+                       (_ nil))))))
+               ((symbol-function 'read-key)
+                (lambda (prompt &rest _)
+                  (push (if prompt (substring-no-properties prompt) "") prompts)
+                  (or (pop keys) (error "No more keys"))))
+               ((symbol-function 'enghi-browse) (lambda (path) (setq browsed path))))
+       ,@body)))
+
+(defun enghi-tests--writes-only (requests)
+  "Return the requests in REQUESTS that write."
+  (seq-remove (lambda (r) (equal (car r) "GET")) requests))
+
+(ert-deftest enghi-test-task-list ()
+  "The lists open on the Inbox, oldest first; j/k choose, Tab changes list."
+  (let (msg)
+    (enghi-tests--with-triage (list ?j ?m ?\t ?. ?q)
+      (setq msg (enghi-task-list))
+      (should (equal (enghi-tests--writes-only requests)
+                     '(("PATCH" "/api/tasks/2" ((state . "someday")))
+                       ("POST" "/api/tasks/5/logs" ((kind . "start") (body . ""))))))
+      (setq prompts (reverse prompts))
+      (should (string-prefix-p
+               "Inbox 3 · Next 1 · Waiting 1 · Scheduled 0 · Later 0 · Someday 0\n›   First"
+               (nth 0 prompts)))
+      (should (string-match-p "^    Second  " (nth 0 prompts)))
+      (should (string-match-p "\n\nn Next .* f File\nt Rename .* RET Details\nj/k Move  Tab List  g Refresh  q Quit\\'"
+                              (nth 0 prompts)))
+      (should (string-match-p "^›   Second" (nth 1 prompts)))
+      ;; The result shows on top, and the cursor stays where it was
+      (should (string-match-p "\\`→ Someday: Second\nInbox 3 .*\n.*\n›   Second" (nth 2 prompts)))
+      ;; Next: the working task is marked, with its project
+      (should (string-match-p "^› ▶ Fix bug +enghi" (nth 3 prompts)))
+      (should (string-prefix-p "▶ Started: Fix bug\n" (nth 4 prompts))))
+    (should (equal msg "Inbox: 3 left"))))
+
+(ert-deftest enghi-test-task-list-empty ()
+  "With the Inbox empty, the lists open on Next; an empty list ignores actions."
+  (let ((enghi-tests--lists (cons '("inbox") (cdr enghi-tests--lists))))
+    (enghi-tests--with-triage (list 'backtab ?d ?j ?q)
+      (should (equal (enghi-task-list) "Inbox 0"))
+      (should-not (enghi-tests--writes-only requests))
+      (setq prompts (reverse prompts))
+      (should (string-match-p "^› ▶ Fix bug" (nth 0 prompts)))
+      (should (string-match-p "\n   (empty)\n" (nth 1 prompts))))))
+
+(ert-deftest enghi-test-task-list-scrolls ()
+  "A long list shows a window of rows around the chosen one."
+  (should (equal (enghi--task-list-window 40 0 15) '(0 . 15)))
+  (should (equal (enghi--task-list-window 40 20 15) '(13 . 28)))
+  (should (equal (enghi--task-list-window 40 39 15) '(25 . 40)))
+  (should (equal (enghi--task-list-window 5 3 15) '(0 . 5)))
+  (let* ((tasks (mapcar (lambda (i) `((id . ,i) (title . ,(format "Task %d" i)) (state . "next")))
+                        (number-sequence 0 39)))
+         (menu (substring-no-properties
+                (enghi--task-list-menu `(("next" ,@tasks)) "next" 20 nil))))
+    (should (string-match-p "\n   ↑ 13 more\n   +Task 13 " menu))
+    (should (string-match-p "\n›   Task 20 " menu))
+    (should (string-match-p "Task 27 .*\n   ↓ 12 more\n" menu))))
+
+(ert-deftest enghi-test-triage-read-key ()
+  "C-n/down and C-p/up move, S-Tab goes back, C-g quits, other keys wait."
+  (dolist (case '((down . ?j) (?\C-n . ?j) (up . ?k) (?\C-p . ?k) (tab . ?\t)
+                  (S-tab . backtab) (backtab . backtab) (return . ?\r) (?\C-g . ?q)))
+    (let ((keys (list ?z (car case))))
+      (cl-letf (((symbol-function 'read-key) (lambda (&rest _) (pop keys))))
+        (should (eq (enghi--triage-read-key "" '(?j ?k ?\t backtab ?\r ?q)) (cdr case)))))))
+
+(ert-deftest enghi-test-triage-posframe ()
+  "With `posframe', the lists show in a posframe that hides for questions."
+  (let ((enghi-triage-display 'posframe) events)
+    (cl-letf (((symbol-function 'enghi--triage-posframe-p) (lambda () t))
+              ((symbol-function 'posframe-show)
+               (lambda (buffer &rest _)
+                 (push (list 'show (with-current-buffer buffer
+                                     (substring-no-properties (buffer-string))))
+                       events)))
+              ((symbol-function 'posframe-hide) (lambda (_) (push '(hide) events))))
+      (enghi-tests--with-triage (list ?n ?q)
+        (cl-letf (((symbol-function 'completing-read)
+                   (lambda (&rest _) (push '(ask) events) "Garden")))
+          (enghi-task-list))
+        ;; No prompt in the echo area: the posframe has the lists
+        (should (equal prompts '("" "")))))
+    (setq events (reverse events))
+    (should (string-match-p "\\`Inbox 3 .*\n›   First" (cadr (nth 0 events))))
+    (should (equal (mapcar #'car events) '(show hide ask show hide)))
+    (should (string-prefix-p "→ Next: First (Garden)\n" (cadr (nth 3 events))))))
+
+(ert-deftest enghi-test-triage-keys ()
+  "The task lists are on the command map."
+  (should (eq (lookup-key enghi-command-map "p") #'enghi-task-list)))
+
+(ert-deftest enghi-test-triage-live ()
+  "`.' moves a task to Next and starts it, and the server pauses the other."
+  (let* ((a (enghi-capture (enghi-tests--unique "Working first")))
+         (b (enghi-capture (enghi-tests--unique "Switch to")))
+         (project (enghi-request "POST" "/api/projects"
+                                 `((title . ,(enghi-tests--unique "Triage project")))))
+         (get (lambda (task)
+                (alist-get 'task (enghi-request "GET" (format "/api/tasks/%d"
+                                                              (alist-get 'id task)))))))
+    (enghi-task-start a)
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (&rest _) (alist-get 'title project))))
+      (should (string-match-p (regexp-quote (format "Paused: %s" (alist-get 'title a)))
+                              (enghi--task-start-now b))))
+    (should-not (alist-get 'working (funcall get a)))
+    (should (alist-get 'working (funcall get b)))
+    (should (equal (alist-get 'state (funcall get b)) "next"))
+    (should (equal (alist-get 'project_id (funcall get b)) (alist-get 'id project)))))
 
 ;;;; Files
 

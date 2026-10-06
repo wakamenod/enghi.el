@@ -285,7 +285,7 @@ is called with the target buffer current during size adjustment, so checking
     ;; `e')
     ;; `enghi-xwidget-key' decides per screen what each one does.
     (dolist (key '("j" "k" "RET" "n" "w" "s" "l" "m" "d" "S" "f" "t" "x" "c" "/"
-                   "i" "p" "g" "o"))
+                   "i" "p" "g" "o" "."))
       (define-key map (kbd key) #'enghi-xwidget-key))
     map)
   "Keymap for webkit buffers opened by enghi.
@@ -371,6 +371,7 @@ view."
     ("x" . enghi--task-drop) ("f" . enghi--task-file)
     ("t" . enghi--task-rename) ("m" . enghi--task-someday)
     ("d" . enghi--task-done) ("S" . enghi--task-skip)
+    ("." . enghi--task-start-now)
     ("o" . enghi--task-open-url) ("Enter" . enghi--task-details))
   "Keys acting on the selected task and their functions.
 Each function takes the task (see `enghi--xwidget-selected-task-script') and
@@ -497,22 +498,39 @@ script itself makes sure it runs once, on the new page."
     (unless (or (null v) (equal v "")) v)))
 
 (defun enghi--task-number (task key)
-  "Return field KEY of TASK (a number in a string) as a number, or nil."
+  "Return field KEY of TASK as a number, or nil.
+A task row from the page holds numbers as strings, one from the API as
+numbers."
   (when-let* ((v (enghi--task-field task key)))
-    (string-to-number v)))
+    (if (numberp v) v (string-to-number v))))
 
-(defun enghi--read-choice (prompt cands current allow-none)
+(defun enghi--read-choice (prompt cands current allow-none &optional create)
   "Read one of CANDS, an alist of (NAME . ID), with PROMPT.
 CURRENT is the ID to offer as the default. With ALLOW-NONE, also offer
-`enghi--none'. Return the chosen (NAME . ID), or nil for none."
+`enghi--none'. Return the chosen (NAME . ID), or nil for none.
+With CREATE, any name may be typed: one that is not among CANDS is passed
+to CREATE, which returns the new (NAME . ID)."
   (let* ((cands (if allow-none (append cands (list (list enghi--none))) cands))
          (default (or (car (rassoc current cands)) (and allow-none enghi--none)))
-         (choice (completing-read prompt cands nil t nil nil default))
+         (choice (string-trim (completing-read prompt cands nil (not create) nil nil default)))
          (cell (assoc choice cands)))
-    (and cell (cdr cell) cell)))
+    (cond (cell (and (cdr cell) cell))
+          ((and create (not (string-empty-p choice))) (funcall create choice)))))
+
+(defun enghi--create-project (title)
+  "Create an active project called TITLE and return it as (TITLE . ID).
+Confirm first, so a typo makes no project, then ask for the outcome, which
+may be left empty."
+  (unless (y-or-n-p (format "Create project \"%s\"? " title))
+    (signal 'quit nil))
+  (let* ((outcome (string-trim (read-string "Outcome (optional): ")))
+         (project (enghi-request "POST" "/api/projects"
+                                 `((title . ,title) (outcome . ,outcome)))))
+    (cons (alist-get 'title project) (alist-get 'id project))))
 
 (defun enghi--read-project (task allow-none)
-  "Read an active project for TASK. With ALLOW-NONE, it may be none."
+  "Read an active project for TASK. With ALLOW-NONE, it may be none.
+A name that is not an active project creates one (`enghi--create-project')."
   (let* ((cands (mapcar (lambda (p) (cons (alist-get 'title p) (alist-get 'id p)))
                         (alist-get 'projects
                                    (enghi-request "GET" "/api/projects" nil
@@ -521,10 +539,8 @@ CURRENT is the ID to offer as the default. With ALLOW-NONE, also offer
     ;; The task may belong to a project that is no longer active
     (when (and current (not (rassoc current cands)))
       (push (cons (alist-get 'project_title task) current) cands))
-    (unless (or cands allow-none)
-      (user-error "No active projects"))
     (or (enghi--read-choice (if allow-none "Project: " "Project (required): ")
-                            cands current allow-none)
+                            cands current allow-none #'enghi--create-project)
         (unless allow-none (user-error "A project is required")))))
 
 (defun enghi--read-context (task)
@@ -656,16 +672,19 @@ Return \"\" for no repeat."
     (enghi--patch-task task '((state . "dropped")))
     (format "Dropped: %s" (enghi--task-title task))))
 
-(defun enghi--task-file (task)
-  "File TASK as a wiki page, then open the page below the list."
+(defun enghi--file-task (task)
+  "File TASK as a wiki page, asking for its title and tags. Return the page."
   (let* ((title (string-trim (read-string "Page title: " (enghi--task-title task))))
          (tags (completing-read-multiple
                 "Tags (comma-separated, may be empty): "
                 (mapcar (lambda (tag) (alist-get 'name tag))
-                        (alist-get 'tags (enghi-request "GET" "/api/tags")))))
-         (res (enghi--task-post task "file" `((title . ,title) (body . "")
-                                              (tags . ,(vconcat tags)))))
-         (page (alist-get 'page res)))
+                        (alist-get 'tags (enghi-request "GET" "/api/tags"))))))
+    (alist-get 'page (enghi--task-post task "file" `((title . ,title) (body . "")
+                                                      (tags . ,(vconcat tags)))))))
+
+(defun enghi--task-file (task)
+  "File TASK as a wiki page, then open the page below the list."
+  (let ((page (enghi--file-task task)))
     (when-let* ((win (get-buffer-window)))
       (select-window win))
     (enghi--open-below (alist-get 'slug page))
@@ -788,8 +807,8 @@ lists."
 (defconst enghi--xwidget-keys-gtd
   '(("j/k" . "Move") ("RET" . "Details") ("n" . "Next") ("w" . "Waiting")
     ("s" . "Scheduled") ("l" . "Later") ("m" . "Someday") ("d" . "Done")
-    ("S" . "Skip") ("f" . "File") ("t" . "Rename") ("x" . "Drop") ("o" . "Open URL")
-    ("c" . "Capture") ("/" . "Search"))
+    ("S" . "Skip") ("f" . "File") ("t" . "Rename") ("x" . "Drop") ("." . "Start")
+    ("o" . "Open URL") ("c" . "Capture") ("/" . "Search"))
   "Keys available in the GTD list.")
 
 (defconst enghi--xwidget-keys-page
@@ -1221,6 +1240,9 @@ The first line becomes the title, the rest becomes the note."
 (autoload 'enghi-task-toggle "enghi-log" nil t)
 (autoload 'enghi-code-link "enghi-log" nil t)
 (autoload 'enghi-code-link-with-comment "enghi-log" nil t)
+(autoload 'enghi--task-start-now "enghi-log")
+;; Sorting tasks from Emacs lives in enghi-triage.el
+(autoload 'enghi-task-list "enghi-triage" nil t)
 
 (defvar enghi-command-map
   (let ((map (make-sparse-keymap)))
@@ -1232,6 +1254,8 @@ The first line becomes the title, the rest becomes the note."
     (define-key map (kbd "d") #'enghi-browse-dashboard)
     (define-key map (kbd "D") #'enghi-day)
     (define-key map (kbd "i") #'enghi-gtd-list)
+    ;; Sorting tasks (enghi-triage.el)
+    (define-key map (kbd "p") #'enghi-task-list)
     (define-key map (kbd "n") #'enghi-new-page)
     ;; Work log (enghi-log.el)
     (define-key map (kbd "l") #'enghi-task-log)
