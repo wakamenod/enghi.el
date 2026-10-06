@@ -225,7 +225,7 @@ If your completion UI is in a posframe (vertico-posframe, for instance), the lis
 (set-face-background 'enghi-posframe-border "#323445")
 ```
 
-`enghi-triage-posframe-poshandler` places it, in the middle of the frame by default, and `enghi-task-list-height` sets how many tasks show at a time (15). Without posframe or a graphical frame, the lists stay in the echo area.
+`enghi-triage-posframe-poshandler` places it, in the middle of the frame by default, `enghi-task-list-height` sets how many tasks show at a time (15) and `enghi-task-list-title-width` how many columns the titles take (48); a longer title is cut with "…". Without posframe or a graphical frame, the lists stay in the echo area.
 
 ## Peek at web screens
 
@@ -373,6 +373,7 @@ The number is the most lines shown in each group. enghi.el itself doesn't need d
 | `enghi-consult-min-input` | `1` | Number of characters typed before search starts |
 | `enghi-dashboard-timeout` | `2` | How long the startup screen section waits for the server (seconds) |
 | `enghi-triage-display` | `echo-area` | Where the task lists show: `echo-area` or `posframe` |
+| `enghi-task-list-title-width` | `48` | Columns the task titles take in the task lists |
 | `enghi-posframe-border-width` | `1` | Border width of the posframes (pixels). The color is the background of the `enghi-posframe-border` face |
 | `enghi-peek-size` | `(0.8 . 0.85)` | Size of the peek, as fractions of the frame's width and height |
 | `enghi-capture-tidy` | `t` | Tidy captured items with Claude when `claude` is found |

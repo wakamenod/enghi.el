@@ -53,6 +53,12 @@ used."
   :type 'function
   :group 'enghi)
 
+(defcustom enghi-task-list-title-width 48
+  "Columns the task titles take in `enghi-task-list'.
+A longer title is cut with an ellipsis. The list is this much wider."
+  :type 'integer
+  :group 'enghi)
+
 (defcustom enghi-task-list-height 15
   "Number of tasks `enghi-task-list' shows at a time."
   :type 'integer
@@ -230,7 +236,8 @@ Next Actions list, with the scheduled tasks whose date has come."
   "Return the row for TASK, highlighted when it is CURRENT."
   (let ((row (concat (if current "›" " ") " "
                      (if (alist-get 'working task) enghi--working-mark " ") " "
-                     (truncate-string-to-width (enghi--task-title task) 48 nil ?\s "…")
+                     (truncate-string-to-width (enghi--task-title task) enghi-task-list-title-width
+                                               nil ?\s "…")
                      "  "
                      (propertize (truncate-string-to-width
                                   (enghi--task-list-side task) 20 nil ?\s "…")
