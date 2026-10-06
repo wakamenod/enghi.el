@@ -1591,6 +1591,23 @@ PATH PAYLOAD), oldest first, `prompts' to what was shown, newest first, and
     (should (eq (get-text-property (string-search "Move to" keys) 'face keys)
                 'enghi-triage-heading))))
 
+(ert-deftest enghi-test-task-list-details ()
+  "RET shows the task's page in the peek, and the list goes on after it."
+  (let (read)
+    (enghi-tests--with-triage (list ?\r ?q)
+      (cl-letf (((symbol-function 'enghi-peek-available-p) (lambda () t))
+                ((symbol-function 'enghi-peek-read) (lambda (path) (push path read))))
+        (enghi-task-list))
+      (should (equal read '("/gtd/clarify/1")))
+      (should-not browsed)
+      ;; The list came back after it
+      (should (= (length prompts) 2))))
+  ;; Without what the peek needs, the page opens with `enghi-browse'
+  (enghi-tests--with-triage (list ?\r ?q)
+    (cl-letf (((symbol-function 'enghi-peek-available-p) #'ignore))
+      (enghi-task-list))
+    (should (equal browsed "/gtd/clarify/1"))))
+
 (ert-deftest enghi-test-triage-read-key ()
   "C-n/down and C-p/up move, S-Tab goes back, C-g quits, other keys wait."
   (dolist (case '((down . ?j) (?\C-n . ?j) (up . ?k) (?\C-p . ?k) (tab . ?\t)
@@ -1697,6 +1714,35 @@ PATH PAYLOAD), oldest first, `prompts' to what was shown, newest first, and
         (should exited)
         (should hidden)
         (should-not enghi--peek-exit)))))
+
+(ert-deftest enghi-test-peek-read ()
+  "`enghi-peek-read' runs the peek's keys until one closes it, then returns."
+  (let ((enghi--peek-xwidget 'view) (enghi-peek-scroll-step 80) opened scripts)
+    (cl-letf (((symbol-function 'enghi--peek-check) #'ignore)
+              ((symbol-function 'enghi--ensure-server) #'ignore)
+              ((symbol-function 'enghi--peek-open)
+               (lambda (url no-keymap)
+                 ;; The caller reads the keys: no transient keymap
+                 (should no-keymap)
+                 (push url opened)
+                 (setq enghi--peek-shown t)))
+              ((symbol-function 'xwidget-webkit-execute-script)
+               (lambda (_view script &rest _) (push script scripts)))
+              ((symbol-function 'posframe-hide) #'ignore))
+      (get-buffer-create enghi--peek-buffer-name)
+      ;; (KEYS . SCROLLS): q, any other key and C-g close; the wheel scrolls
+      (dolist (case '(((?j (wheel-down (nil)) ?q) . 2) ((?j ?z) . 1) ((?j ?\C-g) . 1)))
+        (let ((keys (copy-sequence (car case))))
+          (setq scripts nil)
+          (cl-letf (((symbol-function 'read-key)
+                     (lambda (&rest _) (or (pop keys) (error "Still reading keys")))))
+            (enghi-peek-read "/gtd/clarify/3"))
+          ;; Every key was read, and the peek is closed
+          (should-not keys)
+          (should-not enghi--peek-shown)
+          (should (= (length scripts) (cdr case)))))
+      (should (= (length (seq-filter (lambda (u) (string-suffix-p "/gtd/clarify/3" u)) opened))
+                 3)))))
 
 (ert-deftest enghi-test-peek-working-path-live ()
   "The working task's page opens at the note written last."

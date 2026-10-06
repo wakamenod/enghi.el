@@ -217,7 +217,7 @@ Inbox 4 · Next 12 · Waiting 3 · Scheduled 5 · Later 2 · Someday 30
 
 開くと、Inbox を古い順に表示します。Inbox が空なら Next Actions を表示します。`j` と `k` (または `C-n` と `C-p`) でタスクを選び、`Tab` と `S-Tab` で Inbox、Next、Waiting、Scheduled、Later、Someday を切り替えます。Next は Next Actions リストなので、web 画面と同じく、日付が来た Scheduled のタスクもここに出ます。作業中のタスクには `▶` が付きます。タスクの右には、Inbox なら追加してからの日数、Waiting なら待っている相手、Scheduled なら日付、それ以外はプロジェクトを出します。
 
-操作のキーは xwidget の GTD リストと同じで、ミニバッファで同じことを尋ねます。違うのは2つです。`f` はタスクをページとして保存しますが、ページは開きません。`RET` は `enghi-browse-function` でタスクのページを開きます。キーを押すとリストを読み直し、カーソルは同じ位置に残ります。結果はリストの上に出ます。質問は `C-g` で取り消せます。リストで `q` か `C-g` を押すと終わり、Inbox の残りの件数を表示します。
+操作のキーは xwidget の GTD リストと同じで、ミニバッファで同じことを尋ねます。違うのは2つです。`f` はタスクをページとして保存しますが、ページは開きません。`RET` はタスクのページを、リストの上に peek (「web 画面を posframe で見る」を参照) で出します。peek で `q` を押すとリストに戻ります。posframe や xwidgets がない場合は、`enghi-browse-function` で開きます。キーを押すとリストを読み直し、カーソルは同じ位置に残ります。結果はリストの上に出ます。質問は `C-g` で取り消せます。リストで `q` か `C-g` を押すと終わり、Inbox の残りの件数を表示します。
 
 `.` はタスクの作業を今すぐ開始します。Next Actions にないタスクは先に Next へ移すので、`n` と同じくプロジェクトを尋ねます。日付が来た Scheduled のタスクは、日付と繰り返しを残したまま開始します。
 

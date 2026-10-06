@@ -11,6 +11,8 @@
 ;;   * `enghi-peek-dashboard' shows the dashboard (/).
 ;;   * `enghi-peek-working' shows the Clarify page of the task being worked
 ;;     on, at its latest log entry.
+;;   * `enghi-peek-read' shows a page and reads its keys until it closes, for
+;;     callers that read keys themselves: RET in `enghi-task-list'.
 ;;
 ;; The page is an xwidget-webkit view in a posframe (a child frame). The child
 ;; frame takes no input, so the keys are read in the frame below it through a
@@ -76,6 +78,9 @@
 (defvar enghi--peek-exit nil
   "Function that ends `enghi-peek-map', while the peek is shown.")
 
+(defvar enghi--peek-shown nil
+  "Non-nil while the peek is shown.")
+
 ;;;; ---------------------------------------------------------------- Paths
 
 (defun enghi--peek-working-path ()
@@ -91,11 +96,17 @@ Without a note, the page opens at its work log."
 
 ;;;; ---------------------------------------------------------------- View
 
+(defun enghi-peek-available-p ()
+  "Return non-nil if this Emacs can show the peek."
+  (and (featurep 'xwidget-internal)
+       (require 'posframe nil t)
+       (posframe-workable-p)))
+
 (defun enghi--peek-check ()
   "Signal a `user-error' unless this Emacs can show the peek."
   (unless (featurep 'xwidget-internal)
     (user-error "The peek needs an Emacs built with xwidgets"))
-  (unless (and (require 'posframe nil t) (posframe-workable-p))
+  (unless (enghi-peek-available-p)
     (user-error "The peek needs posframe and a graphical frame")))
 
 (defun enghi--peek-view ()
@@ -114,8 +125,9 @@ Without a note, the page opens at its work log."
                     (concat " " (enghi--xwidget-keys-string enghi--peek-keys)))))
     enghi--peek-xwidget))
 
-(defun enghi--peek-open (url)
-  "Show URL in the peek over the selected frame, and read its keys."
+(defun enghi--peek-open (url &optional no-keymap)
+  "Show URL in the peek over the selected frame, and read its keys.
+With NO-KEYMAP, the caller reads them instead (`enghi-peek-read')."
   (let* ((view (enghi--peek-view))
          (width (round (* (frame-pixel-width) (car enghi-peek-size))))
          (height (round (* (frame-pixel-height) (cdr enghi-peek-size))))
@@ -130,12 +142,14 @@ Without a note, the page opens at its work log."
     (set-frame-size frame width height t)
     (xwidget-resize view (window-body-width window t) (window-body-height window t))
     (xwidget-webkit-goto-uri view url)
-    (unless enghi--peek-exit
+    (setq enghi--peek-shown t)
+    (unless (or no-keymap enghi--peek-exit)
       (setq enghi--peek-exit (set-transient-map enghi-peek-map t #'enghi--peek-hide)))))
 
 (defun enghi--peek-hide ()
   "Hide the peek. Its view stays, for the next time."
-  (setq enghi--peek-exit nil)
+  (setq enghi--peek-exit nil
+        enghi--peek-shown nil)
   (when (get-buffer enghi--peek-buffer-name)
     (posframe-hide enghi--peek-buffer-name)))
 
@@ -151,6 +165,24 @@ Without a note, the page opens at its work log."
     (xwidget-webkit-execute-script enghi--peek-xwidget script)))
 
 ;;;; ---------------------------------------------------------------- Commands
+
+(defun enghi-peek-read (path)
+  "Show PATH on the server in the peek, and read its keys until it closes.
+For callers that read keys themselves, such as `enghi-task-list': they go on
+once it closes. The keys are those of `enghi-peek-map'; any other key, C-g
+included, closes the peek and is not passed on."
+  (enghi--peek-check)
+  (enghi--ensure-server)
+  (enghi--peek-open (enghi--browse-url-for path) t)
+  (unwind-protect
+      (while enghi--peek-shown
+        (let* ((key (condition-case nil (read-key) (quit ?\C-g)))
+               ;; A mouse wheel event is a list; its type is the key
+               (command (lookup-key enghi-peek-map (vector (if (consp key) (car key) key)))))
+          (if (commandp command)
+              (call-interactively command)
+            (enghi--peek-hide))))
+    (enghi--peek-hide)))
 
 ;;;###autoload
 (defun enghi-peek-dashboard ()
