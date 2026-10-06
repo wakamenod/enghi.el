@@ -1216,14 +1216,23 @@ If 409 is returned, handle it differently depending on the type (DESIGN.md
 
 ;;;; ---------------------------------------------------------------- capture
 
+;; Tidying with Claude lives in enghi-tidy.el, loaded on the first capture
+(declare-function enghi--tidy-available-p "enghi-tidy" ())
+(declare-function enghi-tidy-task "enghi-tidy" (task original))
+
 ;;;###autoload
 (defun enghi-capture (title)
-  "Add TITLE to the GTD Inbox as a single line, usable from anywhere."
+  "Add TITLE to the GTD Inbox as a single line, usable from anywhere.
+With the Claude Code CLI installed, the item is then tidied in the
+background (see `enghi-capture-tidy')."
   (interactive "sTo Inbox: ")
   (when (string-empty-p (string-trim title))
     (user-error "Cannot add an empty item"))
-  (let ((task (enghi-request "POST" "/api/tasks" `((title . ,title)))))
-    (message "Added to Inbox: %s" (alist-get 'title task))
+  (let ((task (enghi-request "POST" "/api/tasks" `((title . ,title))))
+        (tidy (and (require 'enghi-tidy nil t) (enghi--tidy-available-p))))
+    (message "Added to Inbox: %s%s" (alist-get 'title task) (if tidy " (tidying…)" ""))
+    (when tidy
+      (enghi-tidy-task task (string-trim title)))
     task))
 
 ;;;###autoload

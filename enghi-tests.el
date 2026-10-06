@@ -11,6 +11,9 @@
 
 (setq enghi-server-url (or (getenv "ENGHI_TEST_URL") "http://127.0.0.1:7799"))
 
+;; Tests never run the real Claude; the tidying tests use a stand-in
+(setq enghi-capture-tidy nil)
+
 (defun enghi-tests--unique (prefix)
   (format "%s-%s" prefix (random 100000)))
 
@@ -1672,6 +1675,152 @@ PATH PAYLOAD), oldest first, `prompts' to what was shown, newest first, and
                                                '((body . "Decided the plan")))))
           (path (enghi--peek-working-path)))
       (should (equal path (format "/gtd/clarify/%d#log-%d" id (alist-get 'id note)))))))
+
+;;;; Tidying captured items
+
+(require 'enghi-tidy)
+
+(ert-deftest enghi-test-tidy-fields ()
+  "Claude's answer becomes the title, the note with the line as typed, and the URL."
+  (let ((task '((id . 5) (version . 1))))
+    (should (equal (enghi--tidy-fields task "tanaka mitsumori https://x.example/q"
+                                       '((title . " Reply to Tanaka ") (note . "By tomorrow")
+                                         (url . "https://x.example/q")))
+                   '((title . "Reply to Tanaka")
+                     (note . "By tomorrow\n\nCaptured as: tanaka mitsumori https://x.example/q")
+                     (url . "https://x.example/q")
+                     (version . 1))))
+    ;; No note: the line as typed alone. Not an http(s) URL: left out.
+    (should (equal (enghi--tidy-fields task "buy mlik" '((title . "Buy milk") (note . "")
+                                                         (url . "javascript:x")))
+                   '((title . "Buy milk") (note . "Captured as: buy mlik") (version . 1))))
+    ;; A task with a URL keeps it
+    (should-not (assq 'url (enghi--tidy-fields '((id . 5) (url . "https://a")) "x"
+                                               '((title . "X") (url . "https://b")))))
+    ;; Nothing to change, or nothing usable
+    (should-not (enghi--tidy-fields task "Buy milk" '((title . "Buy milk") (note . "") (url . ""))))
+    (should-not (enghi--tidy-fields task "x" '((title . " ") (note . "n"))))))
+
+(ert-deftest enghi-test-tidy-answer ()
+  "The tidied item is the structured output of a run that did not fail."
+  (should (equal (enghi--tidy-answer
+                  "{\"is_error\":false,\"structured_output\":{\"title\":\"T\",\"note\":\"\",\"url\":\"\"}}")
+                 '((title . "T") (note . "") (url . ""))))
+  (should-not (enghi--tidy-answer "{\"is_error\":true,\"result\":\"Not logged in\"}"))
+  (should-not (enghi--tidy-answer "Error: something"))
+  (should-not (enghi--tidy-answer "")))
+
+(defvar enghi-tests--claude-dir nil
+  "Directory of the stand-in `claude' while it is set up.")
+
+(defmacro enghi-tests--with-fake-claude (output &rest body)
+  "Run BODY with `enghi-claude-program' a script that prints OUTPUT.
+The script saves its arguments, one per line, and its stdin, which
+`enghi-tests--claude-saw' reads."
+  (declare (indent 1))
+  `(let* ((enghi-tests--claude-dir (make-temp-file "enghi-claude" t))
+          (script (expand-file-name "claude" enghi-tests--claude-dir))
+          (enghi-capture-tidy t)
+          (enghi-claude-program script))
+     (unwind-protect
+         (progn
+           (with-temp-file script
+             (insert "#!/bin/sh\n"
+                     "for a in \"$@\"; do printf '%s\\n' \"$a\"; done > \"$(dirname \"$0\")/args\"\n"
+                     "cat > \"$(dirname \"$0\")/stdin\"\n"
+                     "cat <<'EOF'\n" ,output "\nEOF\n"))
+           (set-file-modes script #o755)
+           ,@body)
+       (delete-directory enghi-tests--claude-dir t))))
+
+(defun enghi-tests--claude-saw (what)
+  "Return what the stand-in `claude' saved: its `args' as a list, or its `stdin'."
+  (with-temp-buffer
+    (insert-file-contents (expand-file-name (symbol-name what) enghi-tests--claude-dir))
+    (if (eq what 'args)
+        (split-string (buffer-string) "\n")
+      (buffer-string))))
+
+(defun enghi-tests--wait-for (pred)
+  "Wait up to 5 seconds for PRED to return non-nil."
+  (let ((tries 0))
+    (while (and (not (funcall pred)) (< tries 50))
+      (accept-process-output nil 0.1)
+      (setq tries (1+ tries)))
+    (funcall pred)))
+
+(ert-deftest enghi-test-tidy-capture ()
+  "Capturing adds the line at once, then Claude's tidying updates it."
+  (let (requests)
+    (enghi-tests--with-fake-claude
+        "{\"is_error\":false,\"structured_output\":{\"title\":\"Reply to Tanaka\",\"note\":\"By tomorrow\",\"url\":\"\"}}"
+      (cl-letf (((symbol-function 'enghi-request)
+                 (lambda (method path &optional payload _params)
+                   (push (list method path payload) requests)
+                   (when (equal method "POST")
+                     `((id . 5) (version . 1) (title . ,(alist-get 'title payload)))))))
+        (should (equal (alist-get 'id (enghi-capture " tanaka reply ")) 5))
+        ;; Added as typed, before Claude answers
+        (should (equal (car (last requests)) '("POST" "/api/tasks" ((title . " tanaka reply ")))))
+        (should (enghi-tests--wait-for (lambda () (assoc "PATCH" requests)))))
+      ;; The line goes in on stdin; no tools, MCP servers, settings or session
+      (let ((args (enghi-tests--claude-saw 'args)))
+        (should (equal (enghi-tests--claude-saw 'stdin) "tanaka reply"))
+        (should (equal (seq-take args 2) '("-p" "--model")))
+        (dolist (flag '("--strict-mcp-config" "--no-session-persistence" "--json-schema"))
+          (should (member flag args)))
+        (should (equal (cadr (member "--tools" args)) ""))
+        (should (equal (cadr (member "--setting-sources" args)) ""))))
+    (should (equal (assoc "PATCH" requests)
+                   '("PATCH" "/api/tasks/5"
+                     ((title . "Reply to Tanaka")
+                      (note . "By tomorrow\n\nCaptured as: tanaka reply")
+                      (version . 1)))))))
+
+(ert-deftest enghi-test-tidy-failure-leaves-item ()
+  "When Claude fails, the item stays as captured and the message says so."
+  (let (requests msg)
+    (enghi-tests--with-fake-claude "{\"is_error\":true,\"result\":\"Not logged in\"}"
+      (cl-letf (((symbol-function 'enghi-request)
+                 (lambda (method path &optional payload _params)
+                   (push (list method path payload) requests)
+                   '((id . 5) (version . 1) (title . "x"))))
+                ((symbol-function 'enghi--tidy-apply)
+                 (let ((apply (symbol-function 'enghi--tidy-apply)))
+                   (lambda (&rest args) (setq msg (apply apply args))))))
+        (enghi-capture "x")
+        (should (enghi-tests--wait-for (lambda () msg)))))
+    (should (equal msg "Could not tidy: x"))
+    (should-not (assoc "PATCH" requests))))
+
+(ert-deftest enghi-test-tidy-off ()
+  "Without the CLI, or with tidying off, capturing runs nothing."
+  (dolist (setting '((t . "enghi-no-such-claude") (nil . "sh")))
+    (let ((enghi-capture-tidy (car setting))
+          (enghi-claude-program (cdr setting))
+          ran)
+      (cl-letf (((symbol-function 'enghi-request) (lambda (&rest _) '((id . 5) (title . "x"))))
+                ((symbol-function 'enghi-tidy-task) (lambda (&rest _) (setq ran t))))
+        (enghi-capture "x"))
+      (should-not ran))))
+
+(ert-deftest enghi-test-tidy-live ()
+  "The update reaches the server, and an item changed meanwhile is left alone."
+  (let* ((line (enghi-tests--unique "tidy me"))
+         (task (enghi-capture line))
+         (id (alist-get 'id task))
+         (output (lambda (title)
+                   (json-encode `((is_error . :json-false)
+                                  (structured_output . ((title . ,title) (note . "")
+                                                        (url . "https://example.com/t")))))))
+         (get (lambda () (alist-get 'task (enghi-request "GET" (format "/api/tasks/%d" id))))))
+    (should (string-prefix-p "Tidied: " (enghi--tidy-apply task line (funcall output "Tidied title"))))
+    (should (equal (alist-get 'title (funcall get)) "Tidied title"))
+    (should (equal (alist-get 'note (funcall get)) (concat "Captured as: " line)))
+    (should (equal (alist-get 'url (funcall get)) "https://example.com/t"))
+    ;; The capture's version is stale now
+    (should (string-prefix-p "Left as captured" (enghi--tidy-apply task line (funcall output "Again"))))
+    (should (equal (alist-get 'title (funcall get)) "Tidied title"))))
 
 ;;;; Files
 

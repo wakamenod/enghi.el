@@ -22,6 +22,7 @@
 | `dashboard` | 任意 | 起動画面の欄で使用 |
 | `browse-at-remote` | 任意 | 作業ログに書くコードリンクの URL に使用 |
 | `posframe` | 任意 | タスクのリストを posframe に出すときに使用。web 画面の表示には必要 |
+| [Claude Code](https://claude.com/claude-code) (`claude`) | 任意 | Inbox に追加した項目を整える |
 
 `markdown-mode` と `consult` はなくても動きます。ない場合は、それぞれ `fundamental-mode` と `completing-read` による検索を使います。
 
@@ -178,6 +179,20 @@ GTD トップ (`/gtd`) では専用のキーを使います。`i` `n` `w` `s` `m
 `C-c C-c` で保存すると、サーバが接続中のすべてのクライアントへ更新を配信します。そのページを表示しているビューは自動で再読み込みされ、スクロール位置も保たれます。Emacs 側で再読み込みする必要はありません。
 
 更新を送るのは保存したときだけで、入力中の内容は送りません。
+
+## 追加した項目を Claude で整える
+
+Claude Code の CLI (`claude`) がインストールされていてログイン済みなら、`C-c n c` で追加した項目を整えます。項目は入力したとおりに、すぐ Inbox に入ります。そのあと `claude -p` が、短いタイトル、詳細を書いたメモ、URL に分けて、項目を更新します。たいてい 10〜30 秒後です。
+
+```
+入力:     らいしゅう 歯医者 予約の電話 03-1234-5678 午前中に
+タイトル: 歯医者の予約の電話
+メモ:     来週、午前中に、03-1234-5678
+
+          Captured as: らいしゅう 歯医者 予約の電話 03-1234-5678 午前中に
+```
+
+待つ必要はありません。Claude が動いている間も Emacs は使えます。入力した文はメモの末尾に残ります。Claude が答える前に項目を変更した場合や、Claude が失敗した場合は、追加したときのまま残り、そのことを表示します。Claude は Haiku (`enghi-capture-tidy-model`) で、ツール、MCP サーバ、ユーザーの設定を読まずに動きます。使わないときは `enghi-capture-tidy` を `nil` にします。
 
 ## Emacs でタスクを仕分ける
 
@@ -360,6 +375,9 @@ enghi:
 | `enghi-triage-display` | `echo-area` | タスクのリストを出す場所。`echo-area` か `posframe` |
 | `enghi-posframe-border-width` | `1` | posframe の枠の幅 (ピクセル)。色は face `enghi-posframe-border` の背景色 |
 | `enghi-peek-size` | `(0.8 . 0.85)` | web 画面を表示する posframe の大きさ。フレームの幅と高さに対する割合 |
+| `enghi-capture-tidy` | `t` | `claude` があれば、追加した項目を Claude で整える |
+| `enghi-claude-program` | `"claude"` | Claude Code の CLI |
+| `enghi-capture-tidy-model` | `"haiku"` | 項目を整えるモデル |
 | `enghi-code-link-url-function` | `#'enghi--browse-at-remote-url` | コードリンクの URL を返す関数。URL がなければ `nil` を返す |
 
 パスワードやトークンの設定は不要です。サーバはループバックからの接続だけを受け付けます。
@@ -391,6 +409,7 @@ make test
 | `enghi-log.el` | GTD タスクの作業ログ、コードリンク |
 | `enghi-triage.el` | タスクを仕分けるリスト (エコーエリアか posframe) |
 | `enghi-peek.el` | web 画面を posframe で表示 |
+| `enghi-tidy.el` | 追加した項目を Claude で整える |
 | `enghi-consult.el` | consult による検索 |
 | `enghi-dashboard.el` | dashboard.el の起動画面に出す欄 |
 | `enghi-tests.el` | テスト |
