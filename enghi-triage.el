@@ -32,6 +32,8 @@
 (require 'subr-x)
 
 ;; posframe is optional: without it, the menu is in the echo area
+(declare-function enghi-peek-available-p "enghi-peek" ())
+(declare-function enghi-peek-read "enghi-peek" (path))
 (declare-function posframe-show "posframe" (buffer-or-name &rest args))
 (declare-function posframe-hide "posframe" (buffer-or-name))
 (declare-function posframe-workable-p "posframe" ())
@@ -113,8 +115,13 @@ when nothing changed, like those in `enghi--xwidget-task-actions'.")
     (format "Filed: %s → %s" (enghi--task-title task) (alist-get 'title page))))
 
 (defun enghi--triage-details (task)
-  "Open the detail page of TASK with `enghi-browse'."
-  (enghi-browse (format "/gtd/clarify/%s" (alist-get 'id task)))
+  "Show the detail page of TASK in the peek, over the list.
+The list comes back when the peek closes. Without what the peek needs
+\(posframe and xwidgets), open it with `enghi-browse' instead."
+  (let ((path (format "/gtd/clarify/%s" (alist-get 'id task))))
+    (if (and (require 'enghi-peek nil t) (enghi-peek-available-p))
+        (enghi-peek-read path)
+      (enghi-browse path)))
   nil)
 
 ;;;; ---------------------------------------------------------------- Display
