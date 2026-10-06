@@ -204,10 +204,15 @@ Inbox 4 · Next 12 · Waiting 3 · Scheduled 5 · Later 2 · Someday 30
 ›   Call the plumber                                  3 d. ago
     Renew the passport                                1 d. ago
     …
+──────────────────────────────────────────────────────────────────────────
+ Move to          Finish      Task          View
+  n  Next          d  Done     .  Start      RET  Details
+  l  Later         S  Skip     t  Rename     o    Open URL
+  w  Waiting       x  Drop     f  File
+  s  Scheduled
+  m  Someday
 
-n Next  l Later  w Waiting  s Scheduled  m Someday  d Done  S Skip  x Drop  f File
-t Rename  . Start  o Open URL  RET Details
-j/k Move  Tab List  g Refresh  q Quit
+  j/k  Move    Tab  List    g  Refresh    q  Quit
 ```
 
 It opens on the Inbox, oldest first, or on Next Actions when the Inbox is empty. `j` and `k` (or `C-n` and `C-p`) choose a task, and `Tab` and `S-Tab` go through Inbox, Next, Waiting, Scheduled, Later and Someday. Next is the Next Actions list, so a scheduled task whose date has come shows there too, as on the web screen. The task you are working on is marked `▶`. To the right of each task is how long ago it was captured (Inbox), who it waits for (Waiting), its date (Scheduled) or its project.
@@ -225,7 +230,7 @@ If your completion UI is in a posframe (vertico-posframe, for instance), the lis
 (set-face-background 'enghi-posframe-border "#323445")
 ```
 
-`enghi-triage-posframe-poshandler` places it, in the middle of the frame by default, `enghi-task-list-height` sets how many tasks show at a time (15) and `enghi-task-list-title-width` how many columns the titles take (48); a longer title is cut with "…". Without posframe or a graphical frame, the lists stay in the echo area.
+The keys are drawn as keycaps with the `enghi-triage-key` face, and the column headings with `enghi-triage-heading`. `enghi-triage-posframe-poshandler` places it, in the middle of the frame by default, `enghi-task-list-height` sets how many tasks show at a time (15) and `enghi-task-list-title-width` how many columns the titles take (48); a longer title is cut with "…". Without posframe or a graphical frame, the lists stay in the echo area.
 
 ## Peek at web screens
 
