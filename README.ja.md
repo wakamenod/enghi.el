@@ -225,7 +225,7 @@ vertico-posframe などで補完を posframe に出している場合は、リ�
 (set-face-background 'enghi-posframe-border "#323445")
 ```
 
-位置は `enghi-triage-posframe-poshandler` で決まり、既定ではフレームの中央です。一度に出すタスクの数は `enghi-task-list-height` (既定 15) で変えられます。posframe がない場合や、グラフィカルなフレームでない場合は、エコーエリアに出ます。
+位置は `enghi-triage-posframe-poshandler` で決まり、既定ではフレームの中央です。一度に出すタスクの数は `enghi-task-list-height` (既定 15)、タイトルの列幅は `enghi-task-list-title-width` (既定 48) で変えられます。列幅より長いタイトルは「…」で切ります。posframe がない場合や、グラフィカルなフレームでない場合は、エコーエリアに出ます。
 
 ## web 画面を posframe で見る
 
@@ -373,6 +373,7 @@ enghi:
 | `enghi-consult-min-input` | `1` | 検索開始に必要な入力文字数 |
 | `enghi-dashboard-timeout` | `2` | 起動画面の欄がサーバの応答を待つ時間 (秒) |
 | `enghi-triage-display` | `echo-area` | タスクのリストを出す場所。`echo-area` か `posframe` |
+| `enghi-task-list-title-width` | `48` | タスクのリストでタイトルが使う列幅 |
 | `enghi-posframe-border-width` | `1` | posframe の枠の幅 (ピクセル)。色は face `enghi-posframe-border` の背景色 |
 | `enghi-peek-size` | `(0.8 . 0.85)` | web 画面を表示する posframe の大きさ。フレームの幅と高さに対する割合 |
 | `enghi-capture-tidy` | `t` | `claude` があれば、追加した項目を Claude で整える |

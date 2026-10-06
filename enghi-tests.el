@@ -1559,6 +1559,21 @@ PATH PAYLOAD), oldest first, `prompts' to what was shown, newest first, and
     (should (string-match-p "\n›   Task 20 " menu))
     (should (string-match-p "Task 27 .*\n   ↓ 12 more\n" menu))))
 
+(ert-deftest enghi-test-task-list-title-width ()
+  "Titles take `enghi-task-list-title-width' columns, cut with an ellipsis."
+  (let ((task '((title . "取引先に見積もりの返事をメールで送る") (state . "next")
+                (project_title . "Q3"))))
+    (let* ((enghi-task-list-title-width 10)
+           (row (substring-no-properties (enghi--task-list-row task nil))))
+            ;; Cut inside a wide character, it pads before the ellipsis
+      (should (string-match-p "\\`    取引先に ?…  " row))
+      (should (= (string-width row) (+ 4 10 2 20))))
+    (let ((enghi-task-list-title-width 40))
+      (should (string-match-p "\\`    取引先に見積もりの返事をメールで送る +Q3"
+                              (substring-no-properties (enghi--task-list-row task nil))))
+      (should (= (string-width (substring-no-properties (enghi--task-list-row task nil)))
+                 (+ 4 40 2 20))))))
+
 (ert-deftest enghi-test-triage-read-key ()
   "C-n/down and C-p/up move, S-Tab goes back, C-g quits, other keys wait."
   (dolist (case '((down . ?j) (?\C-n . ?j) (up . ?k) (?\C-p . ?k) (tab . ?\t)
