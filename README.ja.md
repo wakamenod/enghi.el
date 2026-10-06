@@ -230,7 +230,7 @@ vertico-posframe などで補完を posframe に出している場合は、リ�
 (set-face-background 'enghi-posframe-border "#323445")
 ```
 
-キーは face `enghi-triage-key` でキーキャップ風に、列の見出しは `enghi-triage-heading` で描きます。位置は `enghi-triage-posframe-poshandler` で決まり、既定ではフレームの中央です。一度に出すタスクの数は `enghi-task-list-height` (既定 15)、タイトルの列幅は `enghi-task-list-title-width` (既定 48) で変えられます。列幅より長いタイトルは「…」で切ります。posframe がない場合や、グラフィカルなフレームでない場合は、エコーエリアに出ます。
+キーは face `enghi-triage-key` でキーキャップ風に、列の見出しは `enghi-triage-heading` で描きます。位置は `enghi-triage-posframe-poshandler` で決まります。既定では横は中央、上端はフレームの高さの `enghi-triage-posframe-top` (既定 0.1) の位置です。posframe では、どのリストを出しても、タスクが何件あっても大きさが変わらないので、位置も動きません。一度に出すタスクの数は `enghi-task-list-height` (既定 15)、タイトルの列幅は `enghi-task-list-title-width` (既定 48)、右の列の幅は `enghi-task-list-side-width` (既定 20) で変えられます。列幅より長い文字は「…」で切ります。posframe がない場合や、グラフィカルなフレームでない場合は、エコーエリアに出ます。
 
 ## web 画面を posframe で見る
 
@@ -379,6 +379,7 @@ enghi:
 | `enghi-dashboard-timeout` | `2` | 起動画面の欄がサーバの応答を待つ時間 (秒) |
 | `enghi-triage-display` | `echo-area` | タスクのリストを出す場所。`echo-area` か `posframe` |
 | `enghi-task-list-title-width` | `48` | タスクのリストでタイトルが使う列幅 |
+| `enghi-task-list-side-width` | `20` | タスクのリストで右の列 (プロジェクトや日付など) が使う列幅 |
 | `enghi-posframe-border-width` | `1` | posframe の枠の幅 (ピクセル)。色は face `enghi-posframe-border` の背景色 |
 | `enghi-peek-size` | `(0.8 . 0.85)` | web 画面を表示する posframe の大きさ。フレームの幅と高さに対する割合 |
 | `enghi-capture-tidy` | `t` | `claude` があれば、追加した項目を Claude で整える |
