@@ -204,10 +204,15 @@ Inbox 4 · Next 12 · Waiting 3 · Scheduled 5 · Later 2 · Someday 30
 ›   水道屋に電話する                                  3 d. ago
     パスポートを更新する                              1 d. ago
     …
+──────────────────────────────────────────────────────────────────────────
+ Move to          Finish      Task          View
+  n  Next          d  Done     .  Start      RET  Details
+  l  Later         S  Skip     t  Rename     o    Open URL
+  w  Waiting       x  Drop     f  File
+  s  Scheduled
+  m  Someday
 
-n Next  l Later  w Waiting  s Scheduled  m Someday  d Done  S Skip  x Drop  f File
-t Rename  . Start  o Open URL  RET Details
-j/k Move  Tab List  g Refresh  q Quit
+  j/k  Move    Tab  List    g  Refresh    q  Quit
 ```
 
 開くと、Inbox を古い順に表示します。Inbox が空なら Next Actions を表示します。`j` と `k` (または `C-n` と `C-p`) でタスクを選び、`Tab` と `S-Tab` で Inbox、Next、Waiting、Scheduled、Later、Someday を切り替えます。Next は Next Actions リストなので、web 画面と同じく、日付が来た Scheduled のタスクもここに出ます。作業中のタスクには `▶` が付きます。タスクの右には、Inbox なら追加してからの日数、Waiting なら待っている相手、Scheduled なら日付、それ以外はプロジェクトを出します。
@@ -225,7 +230,7 @@ vertico-posframe などで補完を posframe に出している場合は、リ�
 (set-face-background 'enghi-posframe-border "#323445")
 ```
 
-位置は `enghi-triage-posframe-poshandler` で決まり、既定ではフレームの中央です。一度に出すタスクの数は `enghi-task-list-height` (既定 15)、タイトルの列幅は `enghi-task-list-title-width` (既定 48) で変えられます。列幅より長いタイトルは「…」で切ります。posframe がない場合や、グラフィカルなフレームでない場合は、エコーエリアに出ます。
+キーは face `enghi-triage-key` でキーキャップ風に、列の見出しは `enghi-triage-heading` で描きます。位置は `enghi-triage-posframe-poshandler` で決まり、既定ではフレームの中央です。一度に出すタスクの数は `enghi-task-list-height` (既定 15)、タイトルの列幅は `enghi-task-list-title-width` (既定 48) で変えられます。列幅より長いタイトルは「…」で切ります。posframe がない場合や、グラフィカルなフレームでない場合は、エコーエリアに出ます。
 
 ## web 画面を posframe で見る
 

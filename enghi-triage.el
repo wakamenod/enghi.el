@@ -85,8 +85,23 @@ A longer title is cut with an ellipsis. The list is this much wider."
 Each function takes the task and returns a message after changing it, or nil
 when nothing changed, like those in `enghi--xwidget-task-actions'.")
 
-(defconst enghi--triage-first-row '(?n ?l ?w ?s ?m ?d ?S ?x ?f)
-  "Keys on the first row of the action keys: those that take the task off its list.")
+(defconst enghi--triage-columns
+  '(("Move to" ?n ?l ?w ?s ?m)
+    ("Finish" ?d ?S ?x)
+    ("Task" ?. ?t ?f)
+    ("View" ?\r ?o))
+  "The action keys in columns, each a heading and keys of `enghi--triage-actions'.")
+
+(defface enghi-triage-key
+  '((((type graphic)) :inherit help-key-binding :box (:line-width (1 . -1) :color "gray50"))
+    (t :inherit help-key-binding))
+  "Face of the keys in the task lists, drawn as keycaps on a graphical frame."
+  :group 'enghi)
+
+(defface enghi-triage-heading
+  '((t :inherit (font-lock-keyword-face bold)))
+  "Face of the headings over the keys in the task lists."
+  :group 'enghi)
 
 ;;;; ---------------------------------------------------------------- Actions
 ;;
@@ -108,19 +123,50 @@ when nothing changed, like those in `enghi--xwidget-task-actions'.")
   "Return how KEY is written in the menu."
   (pcase key (?\r "RET") (?\t "Tab") (?\s "SPC") ((pred stringp) key) (_ (string key))))
 
+(defun enghi--triage-keycap (key)
+  "Return KEY as a keycap."
+  (propertize (format " %s " (enghi--triage-key-name key)) 'face 'enghi-triage-key))
+
+(defun enghi--triage-pad (string width)
+  "Return STRING padded with spaces to WIDTH columns."
+  (concat string (make-string (max 0 (- width (string-width string))) ?\s)))
+
 (defun enghi--triage-key-row (keys)
   "Return KEYS, a list of (KEY LABEL ...), as one row."
   (mapconcat (lambda (k)
-               (concat (propertize (enghi--triage-key-name (car k)) 'face 'help-key-binding)
-                       " " (propertize (cadr k) 'face 'shadow)))
-             keys "  "))
+               (concat (enghi--triage-keycap (car k)) " " (propertize (cadr k) 'face 'shadow)))
+             keys "   "))
 
-(defun enghi--triage-keys (keys)
-  "Return KEYS, a list of (KEY LABEL ...), as rows.
-The keys in `enghi--triage-first-row' go first, the others below."
-  (let ((first (lambda (k) (memq (car k) enghi--triage-first-row))))
-    (concat (enghi--triage-key-row (seq-filter first keys)) "\n"
-            (enghi--triage-key-row (seq-remove first keys)))))
+(defun enghi--triage-keys ()
+  "Return the action keys in the columns of `enghi--triage-columns'.
+Each column has its heading on top, and its keys and labels line up."
+  (let* ((columns
+          (mapcar (lambda (column)
+                    (let* ((actions (mapcar (lambda (key) (assq key enghi--triage-actions))
+                                            (cdr column)))
+                           (cap (apply #'max (mapcar (lambda (a) (string-width
+                                                                  (enghi--triage-keycap (car a))))
+                                                     actions))))
+                      (cons (propertize (car column) 'face 'enghi-triage-heading)
+                            (mapcar (lambda (a)
+                                      (concat (enghi--triage-pad (enghi--triage-keycap (car a)) cap)
+                                              " " (cadr a)))
+                                    actions))))
+                  enghi--triage-columns))
+         (widths (mapcar (lambda (column) (apply #'max (mapcar #'string-width column))) columns)))
+    (mapconcat (lambda (row)
+                 (string-trim-right
+                  (concat " " (mapconcat (lambda (cell)
+                                           (enghi--triage-pad (or (nth row (car cell)) "")
+                                                              (+ (cdr cell) 4)))
+                                         (seq-mapn #'cons columns widths) ""))))
+               (number-sequence 0 (1- (apply #'max (mapcar #'length columns))))
+               "\n")))
+
+(defun enghi--triage-rule (text)
+  "Return a rule as wide as the widest line of TEXT."
+  (let ((width (apply #'max (mapcar #'string-width (split-string text "\n")))))
+    (propertize (make-string (/ width (string-width "─")) ?─) 'face 'shadow)))
 
 (defun enghi--triage-posframe-p ()
   "Return non-nil if the menu goes in a posframe."
@@ -202,7 +248,7 @@ hides first: the questions are asked where it was."
 
 (defconst enghi--task-list-nav
   '(("j/k" "Move") (?\t "List") (?g "Refresh") (?q "Quit"))
-  "Keys of `enghi-task-list' besides the actions, as shown.")
+  "Keys of `enghi-task-list' besides the actions, as shown under them.")
 
 (defun enghi--task-list-fetch (contexts)
   "Return every list as (STATE . TASKS), each task marked with CONTEXTS.
@@ -265,21 +311,23 @@ LAST is the message of the previous action, or nil."
                                 (propertize tab 'face 'shadow))))
                           enghi--task-list-lists
                           (propertize " · " 'face 'shadow))))
-    (concat (when last (concat last "\n"))
-            tabs "\n"
-            (if (null tasks)
-                (propertize "   (empty)" 'face 'shadow)
-              (concat (when (> (car window) 0)
-                        (propertize (format "   ↑ %d more\n" (car window)) 'face 'shadow))
-                      (mapconcat (lambda (i) (enghi--task-list-row (nth i tasks) (= i index)))
-                                 (number-sequence (car window) (1- (cdr window)))
-                                 "\n")
-                      (when (< (cdr window) (length tasks))
-                        (propertize (format "\n   ↓ %d more" (- (length tasks) (cdr window)))
-                                    'face 'shadow))))
-            "\n\n"
-            (enghi--triage-keys enghi--triage-actions) "\n"
-            (enghi--triage-key-row enghi--task-list-nav))))
+    (let* ((rows (if (null tasks)
+                     (propertize "   (empty)" 'face 'shadow)
+                   (concat (when (> (car window) 0)
+                             (propertize (format "   ↑ %d more\n" (car window)) 'face 'shadow))
+                           (mapconcat (lambda (i) (enghi--task-list-row (nth i tasks) (= i index)))
+                                      (number-sequence (car window) (1- (cdr window)))
+                                      "\n")
+                           (when (< (cdr window) (length tasks))
+                             (propertize (format "\n   ↓ %d more" (- (length tasks) (cdr window)))
+                                         'face 'shadow)))))
+           (keys (concat (enghi--triage-keys) "\n\n "
+                         (enghi--triage-key-row enghi--task-list-nav))))
+      (concat (when last (concat last "\n"))
+              tabs "\n"
+              rows "\n"
+              (enghi--triage-rule (concat tabs "\n" rows "\n" keys)) "\n"
+              keys))))
 
 (defun enghi--task-list-cycle (state step)
   "Return the list STEP lists away from STATE, wrapping around."

@@ -1525,7 +1525,15 @@ PATH PAYLOAD), oldest first, `prompts' to what was shown, newest first, and
                "Inbox 3 · Next 1 · Waiting 1 · Scheduled 0 · Later 0 · Someday 0\n›   First"
                (nth 0 prompts)))
       (should (string-match-p "^    Second  " (nth 0 prompts)))
-      (should (string-match-p "\n\nn Next .* f File\nt Rename .* RET Details\nj/k Move  Tab List  g Refresh  q Quit\\'"
+      ;; A rule, then the action keys in columns under their headings
+      (should (string-match-p (concat "\n─+\n"
+                                      " Move to +Finish +Task +View\n"
+                                      "  n  Next +d  Done +\\.  Start +RET  Details\n"
+                                      "  l  Later +S  Skip +t  Rename +o    Open URL\n"
+                                      "  w  Waiting +x  Drop +f  File\n"
+                                      "  s  Scheduled\n"
+                                      "  m  Someday\n\n"
+                                      "  j/k  Move    Tab  List    g  Refresh    q  Quit\\'")
                               (nth 0 prompts)))
       (should (string-match-p "^›   Second" (nth 1 prompts)))
       ;; The result shows on top, and the cursor stays where it was
@@ -1573,6 +1581,15 @@ PATH PAYLOAD), oldest first, `prompts' to what was shown, newest first, and
                               (substring-no-properties (enghi--task-list-row task nil))))
       (should (= (string-width (substring-no-properties (enghi--task-list-row task nil)))
                  (+ 4 40 2 20))))))
+
+(ert-deftest enghi-test-triage-keycaps ()
+  "Every action key is in a column once, drawn as a keycap."
+  (should (equal (sort (mapcan (lambda (c) (copy-sequence (cdr c))) enghi--triage-columns) #'<)
+                 (sort (mapcar #'car enghi--triage-actions) #'<)))
+  (let ((keys (enghi--triage-keys)))
+    (should (eq (get-text-property (string-search " RET " keys) 'face keys) 'enghi-triage-key))
+    (should (eq (get-text-property (string-search "Move to" keys) 'face keys)
+                'enghi-triage-heading))))
 
 (ert-deftest enghi-test-triage-read-key ()
   "C-n/down and C-p/up move, S-Tab goes back, C-g quits, other keys wait."
