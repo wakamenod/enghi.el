@@ -1608,6 +1608,51 @@ PATH PAYLOAD), oldest first, `prompts' to what was shown, newest first, and
       (enghi-task-list))
     (should (equal browsed "/gtd/clarify/1"))))
 
+(ert-deftest enghi-test-task-list-steady-size ()
+  "The list is as wide whatever it shows, and in a posframe as tall too."
+  (let* ((tasks (mapcar (lambda (i) `((id . ,i) (title . ,(format "Task %d" i)) (state . "next")
+                                      (project_title . "A project with a long name")))
+                        (number-sequence 1 40)))
+         (lists `(("inbox") ("next" ,@tasks) ("waiting" ,(car tasks))))
+         (size (lambda (state index last fixed)
+                 (let ((lines (split-string (substring-no-properties
+                                             (enghi--task-list-menu lists state index last fixed))
+                                            "\n")))
+                   (cons (apply #'max (mapcar #'string-width lines)) (length lines))))))
+    (dolist (fixed '(nil t))
+      (let ((sizes (list (funcall size "inbox" 0 nil fixed) (funcall size "next" 0 nil fixed)
+                         (funcall size "next" 20 "→ Next: Task 20" fixed)
+                         (funcall size "waiting" 0 nil fixed))))
+        ;; As wide, empty list included
+        (should (= (length (delete-dups (mapcar #'car sizes))) 1))
+        ;; As tall only in a posframe: the echo area shows what is there
+        (if fixed
+            (should (= (length (delete-dups (mapcar #'cdr sizes))) 1))
+          (should (< (cdr (nth 0 sizes)) (cdr (nth 2 sizes)))))))))
+
+(ert-deftest enghi-test-task-list-side-width ()
+  "The right column takes `enghi-task-list-side-width' columns."
+  (let ((task '((title . "Write") (state . "next") (project_title . "プロジェクトの名前がとても長い")))
+        (enghi-task-list-title-width 10))
+    (let ((enghi-task-list-side-width 8))
+      (should (string-match-p "  プロジ ?…\\'" (substring-no-properties (enghi--task-list-row task nil)))))
+    (let ((enghi-task-list-side-width 40))
+      (should (string-match-p "  プロジェクトの名前がとても長い +\\'"
+                              (substring-no-properties (enghi--task-list-row task nil))))
+      (should (= (string-width (substring-no-properties (enghi--task-list-row task nil)))
+                 (enghi--task-list-width) (+ 4 10 2 40))))))
+
+(ert-deftest enghi-test-triage-poshandler ()
+  "The posframe sits in the middle across, its top fixed whatever its height."
+  (let ((enghi-triage-posframe-top 0.1))
+    (dolist (height '(200 600))
+      (should (equal (enghi-triage-poshandler-top-center
+                      (list :parent-frame-width 1000 :parent-frame-height 800
+                            :posframe-width 600 :posframe-height height))
+                     '(200 . 80)))))
+  (should (eq (default-value 'enghi-triage-posframe-poshandler)
+              #'enghi-triage-poshandler-top-center)))
+
 (ert-deftest enghi-test-triage-read-key ()
   "C-n/down and C-p/up move, S-Tab goes back, C-g quits, other keys wait."
   (dolist (case '((down . ?j) (?\C-n . ?j) (up . ?k) (?\C-p . ?k) (tab . ?\t)
@@ -1633,7 +1678,8 @@ PATH PAYLOAD), oldest first, `prompts' to what was shown, newest first, and
         ;; No prompt in the echo area: the posframe has the lists
         (should (equal prompts '("" "")))))
     (setq events (reverse events))
-    (should (string-match-p "\\`Inbox 3 .*\n›   First" (cadr (nth 0 events))))
+    ;; In the posframe, the lines for the message and for ↑ are kept
+    (should (string-match-p "\\`\nInbox 3 .*\n\n›   First" (cadr (nth 0 events))))
     (should (equal (mapcar #'car events) '(show hide ask show hide)))
     (should (string-prefix-p "→ Next: First (Garden)\n" (cadr (nth 3 events))))))
 

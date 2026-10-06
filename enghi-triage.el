@@ -50,14 +50,29 @@ used."
                  (const :tag "Child frame (posframe)" posframe))
   :group 'enghi)
 
-(defcustom enghi-triage-posframe-poshandler #'posframe-poshandler-frame-center
-  "Function placing the posframe; see `posframe-show'."
+(defcustom enghi-triage-posframe-poshandler #'enghi-triage-poshandler-top-center
+  "Function placing the posframe; see `posframe-show'.
+By default the top stays at `enghi-triage-posframe-top', so a taller list
+grows downward."
   :type 'function
+  :group 'enghi)
+
+(defcustom enghi-triage-posframe-top 0.1
+  "Where `enghi-triage-poshandler-top-center' puts the top of the posframe.
+A fraction of the frame's height, from its top."
+  :type 'float
   :group 'enghi)
 
 (defcustom enghi-task-list-title-width 48
   "Columns the task titles take in `enghi-task-list'.
 A longer title is cut with an ellipsis. The list is this much wider."
+  :type 'integer
+  :group 'enghi)
+
+(defcustom enghi-task-list-side-width 20
+  "Columns the right column takes in `enghi-task-list'.
+It holds the project, the date, who a task waits for or when it was
+captured; a longer one is cut with an ellipsis."
   :type 'integer
   :group 'enghi)
 
@@ -170,10 +185,12 @@ Each column has its heading on top, and its keys and labels line up."
                (number-sequence 0 (1- (apply #'max (mapcar #'length columns))))
                "\n")))
 
-(defun enghi--triage-rule (text)
-  "Return a rule as wide as the widest line of TEXT."
-  (let ((width (apply #'max (mapcar #'string-width (split-string text "\n")))))
-    (propertize (make-string (/ width (string-width "─")) ?─) 'face 'shadow)))
+(defun enghi-triage-poshandler-top-center (info)
+  "Place a posframe in the middle of the frame across, with its top fixed.
+The top is `enghi-triage-posframe-top' of the frame's height down, so a
+taller posframe grows downward. INFO is what `posframe-show' passes."
+  (cons (max 0 (/ (- (plist-get info :parent-frame-width) (plist-get info :posframe-width)) 2))
+        (round (* (plist-get info :parent-frame-height) enghi-triage-posframe-top))))
 
 (defun enghi--triage-posframe-p ()
   "Return non-nil if the menu goes in a posframe."
@@ -293,7 +310,8 @@ Next Actions list, with the scheduled tasks whose date has come."
                                                nil ?\s "…")
                      "  "
                      (propertize (truncate-string-to-width
-                                  (enghi--task-list-side task) 20 nil ?\s "…")
+                                  (enghi--task-list-side task) enghi-task-list-side-width
+                                  nil ?\s "…")
                                  'face 'shadow))))
     (when current
       (add-face-text-property 0 (length row) 'highlight t row))
@@ -305,9 +323,15 @@ At most HEIGHT rows; INDEX stays near the middle while the list scrolls."
   (let ((start (max 0 (min (- index (/ (1- height) 2)) (- count height)))))
     (cons start (min count (+ start height)))))
 
-(defun enghi--task-list-menu (lists state index last)
+(defun enghi--task-list-width ()
+  "Return the width of a task row: the marks, the title, a gap, the right column."
+  (+ 4 enghi-task-list-title-width 2 enghi-task-list-side-width))
+
+(defun enghi--task-list-menu (lists state index last &optional fixed)
   "Return the menu for LISTS, showing the list STATE with INDEX chosen.
-LAST is the message of the previous action, or nil."
+LAST is the message of the previous action, or nil. The menu is as wide
+whatever the list. With FIXED it is also as tall: a line that is not there
+is left blank, so a posframe showing it neither moves nor changes size."
   (let* ((tasks (cdr (assoc state lists)))
          (window (enghi--task-list-window (length tasks) index enghi-task-list-height))
          (tabs (mapconcat (lambda (list)
@@ -317,24 +341,33 @@ LAST is the message of the previous action, or nil."
                                   (propertize tab 'face 'bold)
                                 (propertize tab 'face 'shadow))))
                           enghi--task-list-lists
-                          (propertize " · " 'face 'shadow))))
-    (let* ((rows (if (null tasks)
-                     (propertize "   (empty)" 'face 'shadow)
-                   (concat (when (> (car window) 0)
-                             (propertize (format "   ↑ %d more\n" (car window)) 'face 'shadow))
-                           (mapconcat (lambda (i) (enghi--task-list-row (nth i tasks) (= i index)))
-                                      (number-sequence (car window) (1- (cdr window)))
-                                      "\n")
-                           (when (< (cdr window) (length tasks))
-                             (propertize (format "\n   ↓ %d more" (- (length tasks) (cdr window)))
-                                         'face 'shadow)))))
-           (keys (concat (enghi--triage-keys) "\n\n "
-                         (enghi--triage-key-row enghi--task-list-nav))))
-      (concat (when last (concat last "\n"))
-              tabs "\n"
-              rows "\n"
-              (enghi--triage-rule (concat tabs "\n" rows "\n" keys)) "\n"
-              keys))))
+                          (propertize " · " 'face 'shadow)))
+         (rows (if (null tasks)
+                   (list (propertize "   (empty)" 'face 'shadow))
+                 (mapcar (lambda (i) (enghi--task-list-row (nth i tasks) (= i index)))
+                         (number-sequence (car window) (1- (cdr window))))))
+         (above (when (> (car window) 0)
+                  (propertize (format "   ↑ %d more" (car window)) 'face 'shadow)))
+         (below (when (< (cdr window) (length tasks))
+                  (propertize (format "   ↓ %d more" (- (length tasks) (cdr window)))
+                              'face 'shadow)))
+         (keys (concat (enghi--triage-keys) "\n\n "
+                       (enghi--triage-key-row enghi--task-list-nav)))
+         ;; The rule sets the width, whichever is wider: the rows or the keys
+         (width (apply #'max (enghi--task-list-width)
+                       (mapcar #'string-width (split-string (concat tabs "\n" keys) "\n")))))
+    (string-join
+     (delq nil (append (list (cond (last (truncate-string-to-width last width nil nil "…"))
+                                   (fixed ""))
+                             tabs
+                             (or above (and fixed "")))
+                       rows
+                       (and fixed (make-list (- enghi-task-list-height (length rows)) ""))
+                       (list (or below (and fixed ""))
+                             (propertize (make-string (/ width (string-width "─")) ?─)
+                                         'face 'shadow)
+                             keys)))
+     "\n")))
 
 (defun enghi--task-list-cycle (state step)
   "Return the list STEP lists away from STATE, wrapping around."
@@ -368,7 +401,9 @@ It shows in the echo area, or in a posframe; see `enghi-triage-display'."
                    (index (min (or (alist-get state positions nil nil #'equal) 0)
                                (max 0 (1- (length tasks)))))
                    (key (enghi--triage-read-key
-                         (enghi--task-list-menu lists state index last) keys)))
+                         (enghi--task-list-menu lists state index last
+                                                (enghi--triage-posframe-p))
+                         keys)))
               (setq last nil)
               (pcase key
                 (?q (throw 'quit nil))
