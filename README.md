@@ -110,6 +110,7 @@ Press `C-c n n` and enter a title to open a page buffer. Write the body, then sa
 | `d` | `enghi-browse-dashboard` | Open dashboard (including GTD) |
 | `D` | `enghi-day` | Open today's work record (`C-u`: ask for a day) |
 | `i` | `enghi-gtd-list` | Choose and open a GTD list, such as the Inbox |
+| `p` | `enghi-task-list` | Show the GTD lists and act on their tasks with one key |
 | `l` | `enghi-task-log` | Write in a task's work log |
 | `L` | `enghi-task-log-edit` | Edit an entry of a task's work log |
 | `t` | `enghi-task-toggle` | Start or pause a task |
@@ -150,8 +151,8 @@ In the GTD lists, `j` and `k` move the page's cursor. The keys that move a task 
 
 | Key | Asks for | Result |
 |---|---|---|
-| `n` | Project (or `(none)`), and a context if contexts are on | Next action |
-| `l` | Project (required) | Later |
+| `n` | Project (or `(none)`, or a new one), and a context if contexts are on | Next action |
+| `l` | Project (required; may be a new one) | Later |
 | `w` | Who or what it waits for | Waiting For |
 | `s` | Date (`org-read-date`), repeat rule, optional last date | Scheduled |
 | `m` | — | Someday/Maybe |
@@ -160,10 +161,11 @@ In the GTD lists, `j` and `k` move the page's cursor. The keys that move a task 
 | `S` | — | Skip this instance of a recurring task |
 | `t` | New title | Renamed |
 | `f` | Page title and tags | Filed as a wiki page, which opens in the lower window |
+| `.` | Project, if the task is not a next action | Moved to Next and started (the task you were working on is paused) |
 | `RET` | — | Opens the task's detail page |
 | `o` | — | Opens the task's URL in the browser |
 
-Each prompt defaults to the task's current value, and `C-g` cancels without changing anything. After the change, the list reloads with the same row selected. For the repeat rule, pick one that fits the date (`+1w`, `weekly:fri`, `monthly:25`, …) or type any rule the server accepts.
+Each prompt defaults to the task's current value, and `C-g` cancels without changing anything. To put the task in a new project, type a name that isn't in the list: Emacs asks you to confirm, then asks for the project's outcome, which you may leave empty. With vertico, a name that partly matches a project selects that project on `RET`; use `M-RET` to send the name as typed. After the change, the list reloads with the same row selected. For the repeat rule, pick one that fits the date (`+1w`, `weekly:fri`, `monthly:25`, …) or type any rule the server accepts.
 
 On every enghi screen, `c` and `/` run in Emacs. `c` adds an item to the Inbox from the minibuffer with `enghi-capture`, and reloads the page on GTD screens. `/` searches from Emacs, as you type if consult is installed, and opens the chosen result in this view.
 
@@ -174,6 +176,39 @@ The GTD top page (`/gtd`) has its own keys: `i` `n` `w` `s` `m` `p` open Inbox, 
 When you save with `C-c C-c`, the server sends the update to every connected client. Any view showing that page reloads by itself and keeps its scroll position, so you don't need to refresh anything from Emacs.
 
 Updates go out only when you save, not while you type.
+
+## Sort tasks in Emacs
+
+`C-c n p` (`enghi-task-list`) shows the GTD lists and lets you act on their tasks with one key. Nothing takes a window: the lists show in the echo area, or in a posframe (see below).
+
+```
+→ Someday: Buy a new chair
+Inbox 4 · Next 12 · Waiting 3 · Scheduled 5 · Later 2 · Someday 30
+›   Call the plumber                                  3 d. ago
+    Renew the passport                                1 d. ago
+    …
+
+n Next  l Later  w Waiting  s Scheduled  m Someday  d Done  S Skip  x Drop  f File
+t Rename  . Start  o Open URL  RET Details
+j/k Move  Tab List  g Refresh  q Quit
+```
+
+It opens on the Inbox, oldest first, or on Next Actions when the Inbox is empty. `j` and `k` (or `C-n` and `C-p`) choose a task, and `Tab` and `S-Tab` go through Inbox, Next, Waiting, Scheduled, Later and Someday. Next is the Next Actions list, so a scheduled task whose date has come shows there too, as on the web screen. The task you are working on is marked `▶`. To the right of each task is how long ago it was captured (Inbox), who it waits for (Waiting), its date (Scheduled) or its project.
+
+The action keys are those of the GTD lists in xwidget, and they ask the same questions in the minibuffer. Two keys differ: `f` files the task as a page without opening it, and `RET` opens the task's page with `enghi-browse-function`. After a key, the lists reload with the cursor where it was, and the result shows on top. `C-g` in a question cancels it. `q` or `C-g` at the list ends, and the message says how many items are left in the Inbox.
+
+`.` starts working on the task now. A task that is not a next action moves to Next first, and Emacs asks for its project as `n` does. A scheduled task whose date has come starts as it is, keeping its date and repeat rule.
+
+If your completion UI is in a posframe (vertico-posframe, for instance), the lists can show there too, so they stay where the questions are asked. The posframe takes no input: the keys are read in the frame, as vertico-posframe does. It hides while a question is open.
+
+```elisp
+(setq enghi-triage-display 'posframe)
+;; Optional: match vertico-posframe's look
+(setq enghi-triage-posframe-border-width 5)
+(set-face-background 'enghi-triage-posframe-border "#323445")
+```
+
+`enghi-triage-posframe-poshandler` places it, in the middle of the frame by default, and `enghi-task-list-height` sets how many tasks show at a time (15). Without posframe or a graphical frame, the lists stay in the echo area.
 
 ## Save conflicts
 
@@ -198,6 +233,8 @@ Each command below first asks for a task. It offers open tasks only, with workin
 | `enghi-code-link-with-comment` | Same, but opens a log buffer first so you can add a comment |
 
 Starting a task that's already working, or pausing one that isn't, changes nothing, and a message says so. If you added a comment, it's still logged as an entry.
+
+You work on one task at a time. Starting a task pauses the one you were working on, and the message names it: `▶ Started: Write the report (⏸ Paused: Fix the bug)`. This needs a server newer than v0.3.12. Older servers let several tasks be working at once.
 
 ### Log buffer
 
@@ -299,6 +336,7 @@ The number is the most lines shown in each group. enghi.el itself doesn't need d
 | `enghi-xwidget-padding` | `(24 . 12)` | Padding for `enghi-browse-in-xwidget`, in `(horizontal . vertical)` pixels |
 | `enghi-consult-min-input` | `1` | Number of characters typed before search starts |
 | `enghi-dashboard-timeout` | `2` | How long the startup screen section waits for the server (seconds) |
+| `enghi-triage-display` | `echo-area` | Where the triage menu shows: `echo-area` or `posframe` |
 | `enghi-code-link-url-function` | `#'enghi--browse-at-remote-url` | Function returning the URL for a code link, or `nil` |
 
 There are no passwords or tokens to set. The server accepts connections from loopback only.
@@ -328,6 +366,7 @@ make test
 |---|---|
 | `enghi.el` | API client, page editing, capture, keymaps |
 | `enghi-log.el` | Work log of GTD tasks, code links |
+| `enghi-triage.el` | Sorting tasks from the echo area |
 | `enghi-consult.el` | Search using consult |
 | `enghi-dashboard.el` | Section for the dashboard.el startup screen |
 | `enghi-tests.el` | Tests |

@@ -11,6 +11,8 @@
 ;;   * `enghi-task-log' writes a new entry in a Markdown buffer, like a page.
 ;;   * `enghi-task-log-edit' / `enghi-task-log-delete' change an entry.
 ;;   * `enghi-task-start' / `enghi-task-pause' / `enghi-task-toggle' mark it.
+;;     One task is worked on at a time: the server pauses the others on a
+;;     start, and the message names them.
 ;;   * `enghi-code-link' appends a link to the code at point (a permalink from
 ;;     browse-at-remote, if installed) and the region to the working task.
 ;;
@@ -51,6 +53,11 @@ Done, dropped and filed tasks are left out.")
 
 (defconst enghi--working-mark "▶"
   "Mark shown before tasks being worked on.")
+
+(defconst enghi--state-groups
+  '(("next" . "Next Actions") ("inbox" . "Inbox") ("waiting" . "Waiting For")
+    ("scheduled" . "Scheduled") ("later" . "Later") ("someday" . "Someday / Maybe"))
+  "Group titles in the task picker, by state.")
 
 (defun enghi--open-tasks ()
   "Return open tasks, the ones being worked on first.
@@ -106,11 +113,19 @@ That is the task shown in xwidget, otherwise the only task being worked on."
          (default-id (enghi--default-task-id tasks))
          (default (car (seq-find (lambda (c) (equal (alist-get 'id (cdr c)) default-id))
                                  cands)))
+         (group (lambda (name transform)
+                  (if transform
+                      name
+                    (let ((task (cdr (assoc name cands))))
+                      (if (alist-get 'working task)
+                          "Working"
+                        (or (cdr (assoc (alist-get 'state task) enghi--state-groups)) ""))))))
          (choice (completing-read prompt
                                   (lambda (string pred action)
                                     ;; Keep the order: working tasks first
                                     (if (eq action 'metadata)
-                                        '(metadata (display-sort-function . identity))
+                                        `(metadata (display-sort-function . identity)
+                                                   (group-function . ,group))
                                       (complete-with-action action cands string pred)))
                                   nil t nil nil default)))
     (or (cdr (assoc choice cands)) (user-error "No task chosen"))))
@@ -336,24 +351,49 @@ In a buffer editing an entry, delete that one and close the buffer."
       (unless (string-empty-p comment) comment))))
 
 (defun enghi--task-mark (task kind comment)
-  "Mark TASK with KIND (\"start\" or \"pause\") and COMMENT; return a message."
+  "Mark TASK with KIND (\"start\" or \"pause\") and COMMENT; return a message.
+A start pauses the task that was being worked on; the message names it."
   (let* ((res (enghi--with-user-errors
                 (enghi-request "POST" (format "/api/tasks/%s/logs" (alist-get 'id task))
                                `((kind . ,kind) (body . ,(or comment ""))))))
          (title (enghi--task-title task))
          (created (alist-get 'created res))
-         (logged (alist-get 'kind (alist-get 'log res))))
-    (cond ((not created)
-           (if (equal kind "start")
-               (format "Already working on %s" title)
-             (format "%s is not being worked on" title)))
-          ;; A comment on a start/pause that changes nothing becomes a note
-          ((equal logged "note")
-           (format "%s %s; comment logged" (if (equal kind "start") "Already working on"
-                                             "Not working on")
-                   title))
-          ((equal kind "start") (format "%s Started: %s" enghi--working-mark title))
-          (t (format "⏸ Paused: %s" title)))))
+         (logged (alist-get 'kind (alist-get 'log res)))
+         (paused (alist-get 'paused res)))
+    (concat
+     (cond ((not created)
+            (if (equal kind "start")
+                (format "Already working on %s" title)
+              (format "%s is not being worked on" title)))
+           ;; A comment on a start/pause that changes nothing becomes a note
+           ((equal logged "note")
+            (format "%s %s; comment logged" (if (equal kind "start") "Already working on"
+                                              "Not working on")
+                    title))
+           ((equal kind "start") (format "%s Started: %s" enghi--working-mark title))
+           (t (format "⏸ Paused: %s" title)))
+     (if paused
+         (format " (⏸ Paused: %s)"
+                 (mapconcat (lambda (other) (alist-get 'title other)) paused ", "))
+       ""))))
+
+(defun enghi--task-next-action-p (task)
+  "Return non-nil if TASK is on the Next Actions list.
+That is a task in Next, or a scheduled one whose date has come."
+  (pcase (alist-get 'state task)
+    ("next" t)
+    ("scheduled" (when-let* ((date (enghi--task-field task 'scheduled_on)))
+                   (not (string< (format-time-string "%F") date))))))
+
+(defun enghi--task-start-now (task)
+  "Start working on TASK now and return a message.
+A task not on the Next Actions list moves to Next first, asking for its
+project as `n' does. A scheduled task whose date has come is on that list
+already, and keeps its date and repeat rule. This is `.' on the GTD lists in
+xwidget and in `enghi-task-list'."
+  (let ((moved (unless (enghi--task-next-action-p task)
+                 (enghi--task-next task))))
+    (string-join (delq nil (list moved (enghi--task-mark task "start" nil))) "  ")))
 
 ;;;###autoload
 (defun enghi-task-start (task &optional comment)

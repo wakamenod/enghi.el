@@ -110,6 +110,7 @@ git clone https://github.com/wakamenod/enghi.el ~/.emacs.d/site-lisp/enghi.el
 | `d` | `enghi-browse-dashboard` | ダッシュボード (GTD 含む) を開く |
 | `D` | `enghi-day` | 今日の作業記録を開く (`C-u` で日付を指定) |
 | `i` | `enghi-gtd-list` | Inbox などの GTD リストを選んで開く |
+| `p` | `enghi-task-list` | GTD のリストを表示し、タスクを1キーで仕分ける |
 | `l` | `enghi-task-log` | タスクの作業ログを書く |
 | `L` | `enghi-task-log-edit` | 作業ログの記録を編集する |
 | `t` | `enghi-task-toggle` | タスクを開始・中断する |
@@ -150,8 +151,8 @@ GTD リストでは、`j` `k` でページのカーソルを動かします。�
 
 | キー | 尋ねること | 結果 |
 |---|---|---|
-| `n` | プロジェクト (`(none)` も可)、コンテキスト機能が有効ならコンテキスト | Next Action |
-| `l` | プロジェクト (必須) | Later |
+| `n` | プロジェクト (`(none)` や新規も可)、コンテキスト機能が有効ならコンテキスト | Next Action |
+| `l` | プロジェクト (必須。新規も可) | Later |
 | `w` | 誰・何を待っているか | Waiting For |
 | `s` | 日付 (`org-read-date`)、繰り返しルール、任意で最終日 | Scheduled |
 | `m` | — | Someday/Maybe |
@@ -160,10 +161,11 @@ GTD リストでは、`j` `k` でページのカーソルを動かします。�
 | `S` | — | 繰り返しタスクの今回をスキップ |
 | `t` | 新しいタイトル | 名前を変更 |
 | `f` | ページのタイトルとタグ | Wiki ページとして保存し、下側ウィンドウで開く |
+| `.` | Next Actions にないタスクならプロジェクト | Next へ移して開始 (作業中だったタスクは中断) |
 | `RET` | — | タスクの詳細ページを開く |
 | `o` | — | タスクの URL をブラウザで開く |
 
-どの質問も既定値はタスクの今の値で、`C-g` を押せば何も変えずに取り消せます。変更後は、同じ行を選んだままリストを再読み込みします。繰り返しルールは、日付に合った候補 (`+1w`、`weekly:fri`、`monthly:25` など) から選ぶか、サーバが受け付ける書式で直接入力します。
+どの質問も既定値はタスクの今の値で、`C-g` を押せば何も変えずに取り消せます。新しいプロジェクトに入れるときは、一覧にない名前を入力します。確認のあと、プロジェクトの「望む結果」を尋ねます。空のままでもかまいません。vertico では、既存のプロジェクトに一部でも一致する名前を入れて `RET` を押すと、そのプロジェクトが選ばれます。入力したとおりの名前で送るには `M-RET` を押します。変更後は、同じ行を選んだままリストを再読み込みします。繰り返しルールは、日付に合った候補 (`+1w`、`weekly:fri`、`monthly:25` など) から選ぶか、サーバが受け付ける書式で直接入力します。
 
 `c` と `/` は、enghi のどの画面でも Emacs 側で処理します。`c` は `enghi-capture` でミニバッファから Inbox へ追加し、GTD の画面ならページを再読み込みします。`/` は Emacs で検索し、選んだ結果をこのビューで開きます。
 
@@ -174,6 +176,39 @@ GTD トップ (`/gtd`) では専用のキーを使います。`i` `n` `w` `s` `m
 `C-c C-c` で保存すると、サーバが接続中のすべてのクライアントへ更新を配信します。そのページを表示しているビューは自動で再読み込みされ、スクロール位置も保たれます。Emacs 側で再読み込みする必要はありません。
 
 更新を送るのは保存したときだけで、入力中の内容は送りません。
+
+## Emacs でタスクを仕分ける
+
+`C-c n p` (`enghi-task-list`) は GTD のリストを表示し、そのタスクを1キーで操作できるようにします。ウィンドウは使いません。リストはエコーエリアか posframe (後述) に出ます。
+
+```
+→ Someday: 新しい椅子を買う
+Inbox 4 · Next 12 · Waiting 3 · Scheduled 5 · Later 2 · Someday 30
+›   水道屋に電話する                                  3 d. ago
+    パスポートを更新する                              1 d. ago
+    …
+
+n Next  l Later  w Waiting  s Scheduled  m Someday  d Done  S Skip  x Drop  f File
+t Rename  . Start  o Open URL  RET Details
+j/k Move  Tab List  g Refresh  q Quit
+```
+
+開くと、Inbox を古い順に表示します。Inbox が空なら Next Actions を表示します。`j` と `k` (または `C-n` と `C-p`) でタスクを選び、`Tab` と `S-Tab` で Inbox、Next、Waiting、Scheduled、Later、Someday を切り替えます。Next は Next Actions リストなので、web 画面と同じく、日付が来た Scheduled のタスクもここに出ます。作業中のタスクには `▶` が付きます。タスクの右には、Inbox なら追加してからの日数、Waiting なら待っている相手、Scheduled なら日付、それ以外はプロジェクトを出します。
+
+操作のキーは xwidget の GTD リストと同じで、ミニバッファで同じことを尋ねます。違うのは2つです。`f` はタスクをページとして保存しますが、ページは開きません。`RET` は `enghi-browse-function` でタスクのページを開きます。キーを押すとリストを読み直し、カーソルは同じ位置に残ります。結果はリストの上に出ます。質問は `C-g` で取り消せます。リストで `q` か `C-g` を押すと終わり、Inbox の残りの件数を表示します。
+
+`.` はタスクの作業を今すぐ開始します。Next Actions にないタスクは先に Next へ移すので、`n` と同じくプロジェクトを尋ねます。日付が来た Scheduled のタスクは、日付と繰り返しを残したまま開始します。
+
+vertico-posframe などで補完を posframe に出している場合は、リストも posframe に出せます。質問と同じ場所に出るので、目線が動きません。posframe 自体は入力を受けません。キーは vertico-posframe と同じく、フレーム側で読みます。質問している間、posframe は隠れます。
+
+```elisp
+(setq enghi-triage-display 'posframe)
+;; 任意: vertico-posframe と見た目を揃える
+(setq enghi-triage-posframe-border-width 5)
+(set-face-background 'enghi-triage-posframe-border "#323445")
+```
+
+位置は `enghi-triage-posframe-poshandler` で決まり、既定ではフレームの中央です。一度に出すタスクの数は `enghi-task-list-height` (既定 15) で変えられます。posframe がない場合や、グラフィカルなフレームでない場合は、エコーエリアに出ます。
 
 ## 保存の競合
 
@@ -198,6 +233,8 @@ GTD トップ (`/gtd`) では専用のキーを使います。`i` `n` `w` `s` `m
 | `enghi-code-link-with-comment` | リンクをログバッファで開き、コメントを書き足してから送る |
 
 作業中のタスクを開始したり、作業中でないタスクを中断したりしても何も変わりません。その場合はそう表示します。コメントを添えていれば、コメントだけは記録として残ります。
+
+作業中にできるタスクは1つだけです。タスクを開始すると、それまで作業中だったタスクは中断され、そのことを表示します (`▶ Started: 報告書を書く (⏸ Paused: バグを直す)`)。これには v0.3.12 より後のサーバが必要です。古いサーバでは、複数のタスクを同時に作業中にできます。
 
 ### ログバッファ
 
@@ -299,6 +336,7 @@ enghi:
 | `enghi-xwidget-padding` | `(24 . 12)` | `enghi-browse-in-xwidget` の余白 (`(horizontal . vertical)` ピクセル) |
 | `enghi-consult-min-input` | `1` | 検索開始に必要な入力文字数 |
 | `enghi-dashboard-timeout` | `2` | 起動画面の欄がサーバの応答を待つ時間 (秒) |
+| `enghi-triage-display` | `echo-area` | 仕分けメニューを出す場所。`echo-area` か `posframe` |
 | `enghi-code-link-url-function` | `#'enghi--browse-at-remote-url` | コードリンクの URL を返す関数。URL がなければ `nil` を返す |
 
 パスワードやトークンの設定は不要です。サーバはループバックからの接続だけを受け付けます。
@@ -328,6 +366,7 @@ make test
 |---|---|
 | `enghi.el` | API クライアント、ページ編集、キャプチャ、キーマップ |
 | `enghi-log.el` | GTD タスクの作業ログ、コードリンク |
+| `enghi-triage.el` | エコーエリアからのタスクの仕分け |
 | `enghi-consult.el` | consult による検索 |
 | `enghi-dashboard.el` | dashboard.el の起動画面に出す欄 |
 | `enghi-tests.el` | テスト |
