@@ -19,11 +19,17 @@
 ;; transient keymap, `enghi-peek-map': j/k scroll, d and w switch screens, q
 ;; closes. Any other key closes the peek and does what it does.
 ;;
+;; `z' opens a Mermaid diagram of the page in the page's own viewer, as a
+;; click on it would: + and - zoom, h/j/k/l pan, z and Z go to the next and
+;; previous diagram, and q closes the viewer. Emacs remembers that it is open,
+;; since the keys mean something else then; a viewer closed with the mouse is
+;; forgotten at the next q.
+;;
 ;; **One view is kept and reused**, so a page is not loaded from scratch each
-;; time. It carries no xwidget-webkit callback: the events that would call it
-;; (title, load progress) rename the buffer, and nothing here needs them. The
-;; page follows changes by itself through the server's /api/events, so the
-;; work log stays current while it is shown.
+;; time. Its callback handles only the answers of scripts: xwidget-webkit's
+;; own one would rename the buffer on every load. The page follows changes by
+;; itself through the server's /api/events, so the work log stays current
+;; while it is shown.
 ;;
 ;; Needs posframe and an Emacs built with xwidgets.
 
@@ -45,6 +51,7 @@
 (declare-function xwidget-webkit-uri "xwidget" (xwidget))
 (declare-function xwidget-webkit-execute-script "xwidget" (xwidget script &optional callback))
 (declare-function xwidget-buffer "xwidget" (xwidget))
+(declare-function xwidget-put "xwidget.c" (xwidget propname value))
 
 (defcustom enghi-peek-size '(0.8 . 0.85)
   "Size of the peek, as (WIDTH . HEIGHT), each a fraction of the frame."
@@ -66,7 +73,7 @@
 
 (defconst enghi--peek-keys
   '(("j/k" . "Scroll") ("SPC/S-SPC" . "Page") ("</>" . "Top/Bottom")
-    ("d" . "Dashboard") ("w" . "Working") ("r" . "Reload")
+    ("z" . "Diagram") ("d" . "Dashboard") ("w" . "Working") ("r" . "Reload")
     ("E" . "Window") ("o" . "Browser") ("q" . "Close"))
   "Keys shown on the peek's header line.")
 
@@ -80,6 +87,40 @@
 
 (defvar enghi--peek-shown nil
   "Non-nil while the peek is shown.")
+
+(defvar enghi--peek-viewer nil
+  "Non-nil while a diagram is open in the page's viewer.")
+
+(defconst enghi--peek-diagram-script
+  "(function (step) {
+  var btns = Array.prototype.slice.call(document.querySelectorAll('.mermaid-open'));
+  if (!btns.length) return 'none';
+  var dlg = document.querySelector('dialog.mermaid-viewer[open]');
+  var i;
+  if (dlg && typeof window.__enghiDiagram === 'number') {
+    i = (window.__enghiDiagram + step + btns.length) %% btns.length;
+    window.__enghiDiagram = i;
+    // The viewer tidies up on the dialog's close event, which comes later:
+    // opening the next one before it would have it closed at once
+    dlg.addEventListener('close', function () {
+      setTimeout(function () { btns[i].click(); }, 0);
+    }, {once: true});
+    dlg.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true}));
+    return 'open';
+  }
+  i = btns.findIndex(function (b) {
+    var r = b.getBoundingClientRect(); return r.bottom > 0 && r.top < innerHeight;
+  });
+  if (i < 0) i = btns.findIndex(function (b) { return b.getBoundingClientRect().top >= innerHeight; });
+  if (i < 0) i = btns.length - 1;
+  window.__enghiDiagram = i;
+  btns[i].click();
+  return 'open';
+})(%d)"
+  "JS opening a Mermaid diagram in the page's viewer; it returns \"open\" or \"none\".
+With the viewer closed, it opens the first diagram in view, else the next
+one below. With it open, it goes the given number of diagrams on, wrapping
+around. The viewer and `.mermaid-open' are in `web/static/app.js'.")
 
 ;;;; ---------------------------------------------------------------- Paths
 
@@ -109,6 +150,12 @@ Without a note, the page opens at its work log."
   (unless (enghi-peek-available-p)
     (user-error "The peek needs posframe and a graphical frame")))
 
+(defun enghi--peek-xwidget-callback (_xwidget type)
+  "Handle an event of the peek's view of TYPE: only the answer of a script.
+The other events (title, load progress) are left alone."
+  (when (eq type 'javascript-callback)
+    (funcall (nth 3 last-input-event) (nth 4 last-input-event))))
+
 (defun enghi--peek-view ()
   "Return the peek's webkit view, made the first time."
   (let ((buffer (get-buffer-create enghi--peek-buffer-name)))
@@ -120,6 +167,7 @@ Without a note, the page opens at its work log."
           (erase-buffer)
           ;; The size is set each time it is shown
           (setq enghi--peek-xwidget (make-xwidget 'webkit "enghi" 400 300 nil buffer))
+          (xwidget-put enghi--peek-xwidget 'callback #'enghi--peek-xwidget-callback)
           (insert (propertize "*" 'display (list 'xwidget :xwidget enghi--peek-xwidget))))
         (setq-local header-line-format
                     (concat " " (enghi--xwidget-keys-string enghi--peek-keys)))))
@@ -142,14 +190,16 @@ With NO-KEYMAP, the caller reads them instead (`enghi-peek-read')."
     (set-frame-size frame width height t)
     (xwidget-resize view (window-body-width window t) (window-body-height window t))
     (xwidget-webkit-goto-uri view url)
-    (setq enghi--peek-shown t)
+    (setq enghi--peek-shown t
+          enghi--peek-viewer nil)
     (unless (or no-keymap enghi--peek-exit)
       (setq enghi--peek-exit (set-transient-map enghi-peek-map t #'enghi--peek-hide)))))
 
 (defun enghi--peek-hide ()
   "Hide the peek. Its view stays, for the next time."
   (setq enghi--peek-exit nil
-        enghi--peek-shown nil)
+        enghi--peek-shown nil
+        enghi--peek-viewer nil)
   (when (get-buffer enghi--peek-buffer-name)
     (posframe-hide enghi--peek-buffer-name)))
 
@@ -163,6 +213,14 @@ With NO-KEYMAP, the caller reads them instead (`enghi-peek-read')."
   "Run SCRIPT in the page the peek shows."
   (when enghi--peek-xwidget
     (xwidget-webkit-execute-script enghi--peek-xwidget script)))
+
+(defun enghi--peek-viewer-key (key)
+  "Send KEY (a KeyboardEvent `key') to the page's diagram viewer, if it is open."
+  (enghi--peek-script
+   (format "(function () {
+  var d = document.querySelector('dialog.mermaid-viewer[open]');
+  if (d) d.dispatchEvent(new KeyboardEvent('keydown', {key: %s, bubbles: true}));
+})();" (json-encode-string key))))
 
 ;;;; ---------------------------------------------------------------- Commands
 
@@ -179,9 +237,9 @@ included, closes the peek and is not passed on."
         (let* ((key (condition-case nil (read-key) (quit ?\C-g)))
                ;; A mouse wheel event is a list; its type is the key
                (command (lookup-key enghi-peek-map (vector (if (consp key) (car key) key)))))
-          (if (commandp command)
-              (call-interactively command)
-            (enghi--peek-hide))))
+          (cond ((eq (car-safe key) 'xwidget-event)) ; an answer from the page
+                ((commandp command) (call-interactively command))
+                (t (enghi--peek-hide)))))
     (enghi--peek-hide)))
 
 ;;;###autoload
@@ -205,14 +263,62 @@ closes it."
     (or (enghi--peek-working-path) (user-error "No task is being worked on")))))
 
 (defun enghi-peek-forward ()
-  "Scroll the peek down a little."
+  "Scroll the peek down a little, or pan an open diagram down."
   (interactive)
-  (enghi--peek-script (format "window.scrollBy(0, %d);" enghi-peek-scroll-step)))
+  (if enghi--peek-viewer
+      (enghi--peek-viewer-key "ArrowDown")
+    (enghi--peek-script (format "window.scrollBy(0, %d);" enghi-peek-scroll-step))))
 
 (defun enghi-peek-backward ()
-  "Scroll the peek up a little."
+  "Scroll the peek up a little, or pan an open diagram up."
   (interactive)
-  (enghi--peek-script (format "window.scrollBy(0, -%d);" enghi-peek-scroll-step)))
+  (if enghi--peek-viewer
+      (enghi--peek-viewer-key "ArrowUp")
+    (enghi--peek-script (format "window.scrollBy(0, -%d);" enghi-peek-scroll-step))))
+
+(defun enghi-peek-left ()
+  "Pan an open diagram left."
+  (interactive)
+  (when enghi--peek-viewer (enghi--peek-viewer-key "ArrowLeft")))
+
+(defun enghi-peek-right ()
+  "Pan an open diagram right."
+  (interactive)
+  (when enghi--peek-viewer (enghi--peek-viewer-key "ArrowRight")))
+
+(defun enghi-peek-diagram (&optional step)
+  "Open a Mermaid diagram of the page in its viewer, or go to the next one.
+With the viewer closed, open the first diagram in view. With it open, go
+STEP diagrams on, 1 by default."
+  (interactive)
+  (when enghi--peek-xwidget
+    (enghi--xwidget-execute-script
+     enghi--peek-xwidget
+     (format enghi--peek-diagram-script (if enghi--peek-viewer (or step 1) 0))
+     (lambda (answer)
+       (setq enghi--peek-viewer (equal answer "open"))
+       (unless enghi--peek-viewer
+         (message "No diagram on this page"))))))
+
+(defun enghi-peek-diagram-previous ()
+  "Go to the previous Mermaid diagram in the viewer, or open one."
+  (interactive)
+  (enghi-peek-diagram -1))
+
+(defun enghi-peek-zoom-in ()
+  "Zoom into the open diagram."
+  (interactive)
+  (when enghi--peek-viewer (enghi--peek-viewer-key "+")))
+
+(defun enghi-peek-zoom-out ()
+  "Zoom out of the open diagram."
+  (interactive)
+  (when enghi--peek-viewer (enghi--peek-viewer-key "-")))
+
+(defun enghi-peek-zoom-fit ()
+  "Show the whole of the open diagram."
+  (interactive)
+  (when enghi--peek-viewer (enghi--peek-viewer-key "0")))
 
 (defun enghi-peek-page-forward ()
   "Scroll the peek down a page."
@@ -237,26 +343,32 @@ closes it."
 (defun enghi-peek-reload ()
   "Load the page in the peek again."
   (interactive)
+  (setq enghi--peek-viewer nil)
   (enghi--peek-script "location.reload();"))
 
 (defun enghi-peek-goto-dashboard ()
   "Show the dashboard in the peek."
   (interactive)
+  (setq enghi--peek-viewer nil)
   (xwidget-webkit-goto-uri enghi--peek-xwidget (enghi--browse-url-for "/")))
 
 (defun enghi-peek-goto-working ()
   "Show the task being worked on in the peek."
   (interactive)
   (if-let* ((path (enghi--peek-working-path)))
-      (xwidget-webkit-goto-uri enghi--peek-xwidget (enghi--browse-url-for path))
+      (progn (setq enghi--peek-viewer nil)
+             (xwidget-webkit-goto-uri enghi--peek-xwidget (enghi--browse-url-for path)))
     (message "No task is being worked on")))
 
 (defun enghi-peek-close ()
-  "Close the peek."
+  "Close the open diagram, or else the peek."
   (interactive)
-  (when enghi--peek-exit
-    (funcall enghi--peek-exit))
-  (enghi--peek-hide))
+  (if enghi--peek-viewer
+      (progn (enghi--peek-viewer-key "Escape")
+             (setq enghi--peek-viewer nil))
+    (when enghi--peek-exit
+      (funcall enghi--peek-exit))
+    (enghi--peek-hide)))
 
 (defun enghi-peek-open-window ()
   "Close the peek and open its page in a window, in xwidget."
@@ -290,6 +402,16 @@ closes it."
     (define-key map (kbd "<") #'enghi-peek-top)
     (define-key map (kbd ">") #'enghi-peek-bottom)
     (define-key map (kbd "r") #'enghi-peek-reload)
+    (define-key map (kbd "z") #'enghi-peek-diagram)
+    (define-key map (kbd "Z") #'enghi-peek-diagram-previous)
+    (define-key map (kbd "+") #'enghi-peek-zoom-in)
+    (define-key map (kbd "=") #'enghi-peek-zoom-in)
+    (define-key map (kbd "-") #'enghi-peek-zoom-out)
+    (define-key map (kbd "0") #'enghi-peek-zoom-fit)
+    (define-key map (kbd "h") #'enghi-peek-left)
+    (define-key map (kbd "<left>") #'enghi-peek-left)
+    (define-key map (kbd "l") #'enghi-peek-right)
+    (define-key map (kbd "<right>") #'enghi-peek-right)
     (define-key map (kbd "d") #'enghi-peek-goto-dashboard)
     (define-key map (kbd "w") #'enghi-peek-goto-working)
     (define-key map (kbd "E") #'enghi-peek-open-window)

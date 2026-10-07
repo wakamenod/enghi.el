@@ -241,11 +241,14 @@ The keys are drawn as keycaps with the `enghi-triage-key` face, and the column h
 | `j` / `k` | Scroll (also `C-n`/`C-p` and the arrow keys) |
 | `SPC` / `S-SPC` | Scroll a page (also `C-v`/`M-v` and `DEL`) |
 | `<` / `>` | Top / bottom of the page |
+| `z` / `Z` | Open the first Mermaid diagram in view in the page's viewer; while it is open, go to the next / previous diagram |
+| `+` / `-` / `0` | In the viewer: zoom in / out / show the whole diagram |
+| `h` `j` `k` `l` | In the viewer: pan the diagram (also the arrow keys) |
 | `d` / `w` | Show the dashboard / the task you're working on |
 | `r` | Reload |
 | `E` | Close, and open the page in a window (`enghi-browse-in-xwidget`) |
 | `o` | Close, and open the page in the browser |
-| `q` | Close |
+| `q` | Close the diagram viewer, or else the peek |
 
 Any other key closes the peek and does what it does. The page follows changes by itself, so a log entry you add shows up while the peek is open. The view is kept, so the next peek opens quickly.
 
