@@ -869,7 +869,9 @@ The upcoming group is left out, and overdue comes from `deadline_on'."
       (should (eq (enghi-tests--face-at "Working:") 'enghi-dashboard-now))
       (should (eq (enghi-tests--face-at "since 10:42") 'enghi-dashboard-label))
       ;; Work started on an earlier day stands out
-      (should (eq (enghi-tests--face-at "since 9") 'enghi-dashboard-stale-work))
+      (should (eq (enghi-tests--face-at
+                   (format "since %s" (format-time-string "%-m/%-d" (enghi-tests--at 9 0 -1))))
+                  'enghi-dashboard-stale-work))
       ;; An event opens its task, or else the day page
       (enghi-tests--select "Plan")
       (should (equal browsed "/gtd/clarify/9"))
