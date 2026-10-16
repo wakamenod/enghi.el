@@ -200,26 +200,41 @@ You don't wait for it: Emacs stays usable while Claude works. The line as typed 
 
 ```
 → Someday: Buy a new chair
-Inbox 4 · Next 12 · Waiting 3 · Scheduled 5 · Later 2 · Someday 30
+Inbox 4 · Next 12 · Waiting 3 · Scheduled 5 · Later 2 · Someday 30 · Projects 8
 ›   Call the plumber                                  3 d. ago
     Renew the passport                                1 d. ago
     …
 ──────────────────────────────────────────────────────────────────────────
  Move to          Finish      Task          View
   n  Next          d  Done     .  Start      RET  Details
-  l  Later         S  Skip     t  Rename     o    Open URL
-  w  Waiting       x  Drop     f  File
+  p  Project       S  Skip     t  Rename     o    Open URL
+  l  Later         x  Drop     f  File
+  w  Waiting
   s  Scheduled
   m  Someday
 
   j/k  Move    Tab  List    g  Refresh    q  Quit
 ```
 
-It opens on the Inbox, oldest first, or on Next Actions when the Inbox is empty. `j` and `k` (or `C-n` and `C-p`) choose a task, and `Tab` and `S-Tab` go through Inbox, Next, Waiting, Scheduled, Later and Someday. Next is the Next Actions list, so a scheduled task whose date has come shows there too, as on the web screen. The task you are working on is marked `▶`. To the right of each task is how long ago it was captured (Inbox), who it waits for (Waiting), its date (Scheduled) or its project.
+It opens on the Inbox, oldest first, or on Next Actions when the Inbox is empty. `j` and `k` (or `C-n` and `C-p`) choose a task, and `Tab` and `S-Tab` go through Inbox, Next, Waiting, Scheduled, Later, Someday and Projects. Next is the Next Actions list, so a scheduled task whose date has come shows there too, as on the web screen. The task you are working on is marked `▶`. To the right of each task is how long ago it was captured (Inbox), who it waits for (Waiting), its date (Scheduled) or its project.
 
-The action keys are those of the GTD lists in xwidget, and they ask the same questions in the minibuffer. Two keys differ: `f` files the task as a page without opening it, and `RET` shows the task's page over the list in the peek (see Peek at web screens); `q` there brings the list back. Without posframe or xwidgets, `RET` opens the page with `enghi-browse-function`. After a key, the lists reload with the cursor where it was, and the result shows on top. `C-g` in a question cancels it. `q` or `C-g` at the list ends, and the message says how many items are left in the Inbox.
+The action keys are those of the GTD lists in xwidget, and they ask the same questions in the minibuffer. `p` is only here (see below), and two keys differ: `f` files the task as a page without opening it, and `RET` shows the task's page over the list in the peek (see Peek at web screens); `q` there brings the list back. Without posframe or xwidgets, `RET` opens the page with `enghi-browse-function`. After a key, the lists reload with the cursor where it was, and the result shows on top. `C-g` in a question cancels it. `q` or `C-g` at the list ends, and the message says how many items are left in the Inbox.
 
 `.` starts working on the task now. A task that is not a next action moves to Next first, and Emacs asks for its project as `n` does. A scheduled task whose date has come starts as it is, keeping its date and repeat rule.
+
+`p` is for an item that turns out to take more than one step. It makes the item a project of its own and keeps it as the project's first next action. Emacs asks for the project's title and outcome, then for the next action (the item's title, to reword as the first concrete step) and its context if contexts are on. Nothing is made until every question is answered, so `C-g` on any of them leaves no project behind. Since the task stays, its URL, note and work log stay with it.
+
+The last list, Projects, holds the active projects. Its keys act on the chosen project:
+
+```
+──────────────────────────────────────────────────────────────────────────
+ Project         Status         View
+  a  Add next     d  Done        RET  Details
+  t  Rename       m  Someday     o    Open URL
+                  x  Drop
+```
+
+To the right of a project is `no next` when it has no next action, as on the weekly review, or else its area. `a` adds a next action to the project, asking for its title and context. `m` moves it to Someday and offers to set a review date: once it has come, the project shows in the weekly review. `x` asks before dropping it, and `RET` shows the project's page in the peek.
 
 If your completion UI is in a posframe (vertico-posframe, for instance), the lists can show there too, so they stay where the questions are asked. The posframe takes no input: the keys are read in the frame, as vertico-posframe does. It hides while a question is open.
 

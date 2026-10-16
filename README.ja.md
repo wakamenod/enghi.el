@@ -200,26 +200,41 @@ Claude Code の CLI (`claude`) がインストールされていてログイン�
 
 ```
 → Someday: 新しい椅子を買う
-Inbox 4 · Next 12 · Waiting 3 · Scheduled 5 · Later 2 · Someday 30
+Inbox 4 · Next 12 · Waiting 3 · Scheduled 5 · Later 2 · Someday 30 · Projects 8
 ›   水道屋に電話する                                  3 d. ago
     パスポートを更新する                              1 d. ago
     …
 ──────────────────────────────────────────────────────────────────────────
  Move to          Finish      Task          View
   n  Next          d  Done     .  Start      RET  Details
-  l  Later         S  Skip     t  Rename     o    Open URL
-  w  Waiting       x  Drop     f  File
+  p  Project       S  Skip     t  Rename     o    Open URL
+  l  Later         x  Drop     f  File
+  w  Waiting
   s  Scheduled
   m  Someday
 
   j/k  Move    Tab  List    g  Refresh    q  Quit
 ```
 
-開くと、Inbox を古い順に表示します。Inbox が空なら Next Actions を表示します。`j` と `k` (または `C-n` と `C-p`) でタスクを選び、`Tab` と `S-Tab` で Inbox、Next、Waiting、Scheduled、Later、Someday を切り替えます。Next は Next Actions リストなので、web 画面と同じく、日付が来た Scheduled のタスクもここに出ます。作業中のタスクには `▶` が付きます。タスクの右には、Inbox なら追加してからの日数、Waiting なら待っている相手、Scheduled なら日付、それ以外はプロジェクトを出します。
+開くと、Inbox を古い順に表示します。Inbox が空なら Next Actions を表示します。`j` と `k` (または `C-n` と `C-p`) でタスクを選び、`Tab` と `S-Tab` で Inbox、Next、Waiting、Scheduled、Later、Someday、Projects を切り替えます。Next は Next Actions リストなので、web 画面と同じく、日付が来た Scheduled のタスクもここに出ます。作業中のタスクには `▶` が付きます。タスクの右には、Inbox なら追加してからの日数、Waiting なら待っている相手、Scheduled なら日付、それ以外はプロジェクトを出します。
 
-操作のキーは xwidget の GTD リストと同じで、ミニバッファで同じことを尋ねます。違うのは2つです。`f` はタスクをページとして保存しますが、ページは開きません。`RET` はタスクのページを、リストの上に peek (「web 画面を posframe で見る」を参照) で出します。peek で `q` を押すとリストに戻ります。posframe や xwidgets がない場合は、`enghi-browse-function` で開きます。キーを押すとリストを読み直し、カーソルは同じ位置に残ります。結果はリストの上に出ます。質問は `C-g` で取り消せます。リストで `q` か `C-g` を押すと終わり、Inbox の残りの件数を表示します。
+操作のキーは xwidget の GTD リストと同じで、ミニバッファで同じことを尋ねます。`p` はここだけのキーです (後述)。ほかに違うのは2つです。`f` はタスクをページとして保存しますが、ページは開きません。`RET` はタスクのページを、リストの上に peek (「web 画面を posframe で見る」を参照) で出します。peek で `q` を押すとリストに戻ります。posframe や xwidgets がない場合は、`enghi-browse-function` で開きます。キーを押すとリストを読み直し、カーソルは同じ位置に残ります。結果はリストの上に出ます。質問は `C-g` で取り消せます。リストで `q` か `C-g` を押すと終わり、Inbox の残りの件数を表示します。
 
 `.` はタスクの作業を今すぐ開始します。Next Actions にないタスクは先に Next へ移すので、`n` と同じくプロジェクトを尋ねます。日付が来た Scheduled のタスクは、日付と繰り返しを残したまま開始します。
+
+`p` は、1回では終わらないとわかった項目に使います。項目からプロジェクトを作り、項目はそのプロジェクトの最初の Next Action として残します。プロジェクトの名前と Outcome を尋ね、次に Next Action を尋ねます。Next Action の初期値は項目の名前なので、最初の具体的な一歩に書き換えます。コンテキストを使う設定なら、コンテキストも尋ねます。すべてに答えるまで何も作らないので、途中で `C-g` を押してもプロジェクトは残りません。タスクはそのまま残るので、URL、メモ、作業ログも引き継がれます。
+
+最後のリスト Projects には、active なプロジェクトが出ます。キーは選んだプロジェクトに働きます。
+
+```
+──────────────────────────────────────────────────────────────────────────
+ Project         Status         View
+  a  Add next     d  Done        RET  Details
+  t  Rename       m  Someday     o    Open URL
+                  x  Drop
+```
+
+プロジェクトの右には、Next Action がなければ週次レビューと同じく `no next` を、あれば Area を出します。`a` はプロジェクトに Next Action を追加します。名前とコンテキストを尋ねます。`m` は Someday に移し、見直す日付を設定するか尋ねます。日付を設定すると、その日以降の週次レビューに出てきます。`x` は確認してから Drop します。`RET` はプロジェクトのページを peek で出します。
 
 vertico-posframe などで補完を posframe に出している場合は、リストも posframe に出せます。質問と同じ場所に出るので、目線が動きません。posframe 自体は入力を受けません。キーは vertico-posframe と同じく、フレーム側で読みます。質問している間、posframe は隠れます。
 
