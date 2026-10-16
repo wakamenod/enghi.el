@@ -1475,18 +1475,26 @@ A leaf or use-package `:bind' then needs no autoload of its own."
      ((id . 6) (title . "Reply") (state . "waiting") (waiting_for . "Bob"))))
   "Tasks per state on the stubbed server. The Inbox is not oldest first.")
 
+(defvar enghi-tests--projects
+  '(((id . 7) (title . "Garden") (status . "active"))
+    ((id . 8) (title . "Novel") (status . "active") (area_name . "Writing")))
+  "Active projects on the stubbed server. Garden has no next action.")
+
 (defmacro enghi-tests--with-triage (keys &rest body)
   "Run BODY with the server stubbed and KEYS read by `read-key', in order.
-Bind `requests' to the requests made but the lists and settings, as (METHOD
-PATH PAYLOAD), oldest first, `prompts' to what was shown, newest first, and
-`browsed' to the path given to `enghi-browse'."
+Bind `requests' to the requests made but the lists, the projects and the
+settings, as (METHOD PATH PAYLOAD), oldest first, `prompts' to what was
+shown, newest first, and `browsed' to the path given to `enghi-browse'."
   (declare (indent 1))
   `(let ((requests nil) (prompts nil) (browsed nil) (keys ,keys))
      (cl-letf (((symbol-function 'enghi-request)
                 (lambda (method path &optional payload params)
-                  (pcase path
-                    ("/api/settings" `((contexts . ,enghi-tests--contexts)))
-                    ("/api/tasks"
+                  (pcase (cons method path)
+                    (`(,_ . "/api/settings") `((contexts . ,enghi-tests--contexts)))
+                    ('("GET" . "/api/projects") `((projects ,@enghi-tests--projects)))
+                    ('("GET" . "/api/projects/stalled")
+                     `((projects ,(car enghi-tests--projects))))
+                    ('("GET" . "/api/tasks")
                      (let ((state (alist-get 'state params)))
                        ;; The Next list asks for the Next Actions list
                        `((tasks ,@(cdr (assoc (if (equal state "next_actions") "next" state)
@@ -1494,7 +1502,9 @@ PATH PAYLOAD), oldest first, `prompts' to what was shown, newest first, and
                     (_
                      (setq requests (append requests (list (list method path payload))))
                      (pcase path
-                       ("/api/projects" '((projects ((id . 7) (title . "Garden")))))
+                       ;; Created: a task is captured, a project made
+                       ("/api/tasks" `((id . 10) ,@payload (state . "inbox")))
+                       ("/api/projects" `((id . 9) ,@payload (status . "active")))
                        ("/api/contexts" '((contexts ((id . 3) (name . "@home")))))
                        ((rx "/api/tasks/" (let id (+ digit)) eos)
                         `((task (id . ,(string-to-number id)) (title . "Renamed")
@@ -1522,15 +1532,17 @@ PATH PAYLOAD), oldest first, `prompts' to what was shown, newest first, and
                        ("POST" "/api/tasks/5/logs" ((kind . "start") (body . ""))))))
       (setq prompts (reverse prompts))
       (should (string-prefix-p
-               "Inbox 3 · Next 1 · Waiting 1 · Scheduled 0 · Later 0 · Someday 0\n›   First"
+               (concat "Inbox 3 · Next 1 · Waiting 1 · Scheduled 0 · Later 0 · Someday 0"
+                       " · Projects 2\n›   First")
                (nth 0 prompts)))
       (should (string-match-p "^    Second  " (nth 0 prompts)))
       ;; A rule, then the action keys in columns under their headings
       (should (string-match-p (concat "\n─+\n"
                                       " Move to +Finish +Task +View\n"
                                       "  n  Next +d  Done +\\.  Start +RET  Details\n"
-                                      "  l  Later +S  Skip +t  Rename +o    Open URL\n"
-                                      "  w  Waiting +x  Drop +f  File\n"
+                                      "  p  Project +S  Skip +t  Rename +o    Open URL\n"
+                                      "  l  Later +x  Drop +f  File\n"
+                                      "  w  Waiting\n"
                                       "  s  Scheduled\n"
                                       "  m  Someday\n\n"
                                       "  j/k  Move    Tab  List    g  Refresh    q  Quit\\'")
@@ -1584,9 +1596,11 @@ PATH PAYLOAD), oldest first, `prompts' to what was shown, newest first, and
 
 (ert-deftest enghi-test-triage-keycaps ()
   "Every action key is in a column once, drawn as a keycap."
-  (should (equal (sort (mapcan (lambda (c) (copy-sequence (cdr c))) enghi--triage-columns) #'<)
-                 (sort (mapcar #'car enghi--triage-actions) #'<)))
-  (let ((keys (enghi--triage-keys)))
+  (dolist (set (list (cons enghi--triage-actions enghi--triage-columns)
+                     (cons enghi--triage-project-actions enghi--triage-project-columns)))
+    (should (equal (sort (mapcan (lambda (c) (copy-sequence (cdr c))) (cdr set)) #'<)
+                   (sort (mapcar #'car (car set)) #'<))))
+  (let ((keys (enghi--triage-keys enghi--triage-actions enghi--triage-columns)))
     (should (eq (get-text-property (string-search " RET " keys) 'face keys) 'enghi-triage-key))
     (should (eq (get-text-property (string-search "Move to" keys) 'face keys)
                 'enghi-triage-heading))))
@@ -1608,12 +1622,104 @@ PATH PAYLOAD), oldest first, `prompts' to what was shown, newest first, and
       (enghi-task-list))
     (should (equal browsed "/gtd/clarify/1"))))
 
+(defmacro enghi-tests--answering (answers &rest body)
+  "Run BODY with `read-string' answering ANSWERS, in order.
+Bind `asked' to the prompts and their defaults, oldest first."
+  (declare (indent 1))
+  `(let ((answers ,answers) (asked nil))
+     (cl-letf (((symbol-function 'read-string)
+                (lambda (prompt &optional initial &rest _)
+                  (setq asked (append asked (list (cons prompt initial))))
+                  (if answers (pop answers) (signal 'quit nil)))))
+       ,@body)))
+
+(ert-deftest enghi-test-task-list-to-project ()
+  "`p' makes a project of the task and keeps the task as its next action."
+  (let ((enghi-tests--contexts t))
+    (enghi-tests--with-triage (list ?p ?q)
+      (enghi-tests--answering '("Plan the trip" "Booked" "Ask family for dates")
+        (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) "@home")))
+          (enghi-task-list))
+        ;; The result shows over the list
+        (should (string-prefix-p "→ Project: Plan the trip (next: Ask family for dates)\n"
+                                 (car prompts)))
+        ;; The project and the next action both start from the task's title
+        (should (equal asked '(("Project title: " . "First") ("Outcome (optional): ")
+                               ("Next action: " . "First")))))
+      (should (equal (enghi-tests--writes-only requests)
+                     '(("POST" "/api/projects" ((title . "Plan the trip") (outcome . "Booked")))
+                       ("PATCH" "/api/tasks/1" ((state . "next") (project_id . 9)
+                                                (title . "Ask family for dates")
+                                                (context_id . 3))))))))
+  ;; Kept as it is, the title is not sent
+  (enghi-tests--with-triage (list ?p ?q)
+    (enghi-tests--answering '("Trip" "" "First")
+      (enghi-task-list))
+    (should (equal (enghi-tests--writes-only requests)
+                   '(("POST" "/api/projects" ((title . "Trip") (outcome . "")))
+                     ("PATCH" "/api/tasks/1" ((state . "next") (project_id . 9))))))))
+
+(ert-deftest enghi-test-task-list-to-project-cancelled ()
+  "Cancelled on a question, `p' makes nothing."
+  (enghi-tests--with-triage (list ?p ?q)
+    (enghi-tests--answering '("Plan the trip" "Booked")
+      (enghi-task-list))
+    (should (string-prefix-p "Cancelled\n" (car prompts)))
+    (should-not (enghi-tests--writes-only requests))))
+
+(ert-deftest enghi-test-task-list-projects ()
+  "The last list holds the active projects and its keys act on them."
+  (enghi-tests--with-triage (list 'backtab ?j ?a ?. ?d ?q)
+    (enghi-tests--answering '("Draft chapter 1")
+      (enghi-task-list))
+    (setq prompts (reverse prompts))
+    (should (string-match-p "· Projects 2\n›   Garden +no next +\n    Novel +Writing"
+                            (nth 1 prompts)))
+    (should (string-match-p (concat "\n─+\n"
+                                    " Project +Status +View\n"
+                                    "  a  Add next +d  Done +RET  Details\n"
+                                    "  t  Rename +m  Someday +o    Open URL\n"
+                                    " +x  Drop\n\n")
+                            (nth 1 prompts)))
+    (should (string-prefix-p "+ Next: Draft chapter 1 (Novel)\n" (nth 3 prompts)))
+    ;; `.' is not a key of the projects: the same menu read the next key
+    (should (equal (nth 3 prompts) (nth 4 prompts)))
+    (should (= (length prompts) 6))
+    (should (equal (enghi-tests--writes-only requests)
+                   '(("POST" "/api/tasks" ((title . "Draft chapter 1")))
+                     ("PATCH" "/api/tasks/10" ((state . "next") (project_id . 8)))
+                     ("PATCH" "/api/projects/8" ((status . "done"))))))))
+
+(ert-deftest enghi-test-task-list-project-someday ()
+  "`m' parks a project in Someday, with a review date if one is wanted."
+  (dolist (case '((t . ((status . "someday") (review_on . "2026-12-01")))
+                  (nil . ((status . "someday")))))
+    (enghi-tests--with-triage (list 'backtab ?m ?q)
+      (cl-letf (((symbol-function 'y-or-n-p) (lambda (_) (car case)))
+                ((symbol-function 'enghi--read-date) (lambda (&rest _) "2026-12-01")))
+        (enghi-task-list))
+      (should (equal (enghi-tests--writes-only requests)
+                     `(("PATCH" "/api/projects/7" ,(cdr case))))))))
+
+(ert-deftest enghi-test-task-list-project-drop-and-details ()
+  "`x' drops a project once confirmed; RET shows its page."
+  (enghi-tests--with-triage (list 'backtab ?x ?x ?\r ?q)
+    (let ((confirm (list nil t)) read)
+      (cl-letf (((symbol-function 'y-or-n-p) (lambda (_) (pop confirm)))
+                ((symbol-function 'enghi-peek-available-p) (lambda () t))
+                ((symbol-function 'enghi-peek-read) (lambda (path) (push path read))))
+        (enghi-task-list))
+      (should (equal read '("/gtd/project/7"))))
+    (should (equal (enghi-tests--writes-only requests)
+                   '(("PATCH" "/api/projects/7" ((status . "dropped"))))))))
+
 (ert-deftest enghi-test-task-list-steady-size ()
   "The list is as wide whatever it shows, and in a posframe as tall too."
   (let* ((tasks (mapcar (lambda (i) `((id . ,i) (title . ,(format "Task %d" i)) (state . "next")
                                       (project_title . "A project with a long name")))
                         (number-sequence 1 40)))
-         (lists `(("inbox") ("next" ,@tasks) ("waiting" ,(car tasks))))
+         (lists `(("inbox") ("next" ,@tasks) ("waiting" ,(car tasks))
+                  ("projects" ((id . 7) (title . "Garden") (stalled . t)))))
          (size (lambda (state index last fixed)
                  (let ((lines (split-string (substring-no-properties
                                              (enghi--task-list-menu lists state index last fixed))
@@ -1622,7 +1728,8 @@ PATH PAYLOAD), oldest first, `prompts' to what was shown, newest first, and
     (dolist (fixed '(nil t))
       (let ((sizes (list (funcall size "inbox" 0 nil fixed) (funcall size "next" 0 nil fixed)
                          (funcall size "next" 20 "→ Next: Task 20" fixed)
-                         (funcall size "waiting" 0 nil fixed))))
+                         (funcall size "waiting" 0 nil fixed)
+                         (funcall size "projects" 0 nil fixed))))
         ;; As wide, empty list included
         (should (= (length (delete-dups (mapcar #'car sizes))) 1))
         ;; As tall only in a posframe: the echo area shows what is there
@@ -1705,6 +1812,35 @@ PATH PAYLOAD), oldest first, `prompts' to what was shown, newest first, and
     (should (alist-get 'working (funcall get b)))
     (should (equal (alist-get 'state (funcall get b)) "next"))
     (should (equal (alist-get 'project_id (funcall get b)) (alist-get 'id project)))))
+
+(ert-deftest enghi-test-triage-projects-live ()
+  "`p' makes a project of a task, and the projects list follows their next actions."
+  (let* ((task (enghi-capture (enghi-tests--unique "Plan")))
+         (title (enghi-tests--unique "Trip"))
+         (find (lambda (id)
+                 (seq-find (lambda (p) (equal (alist-get 'id p) id))
+                           (enghi--task-list-projects nil)))))
+    (enghi-tests--answering (list title "" "Ask for dates")
+      (enghi--triage-to-project task))
+    (let* ((got (alist-get 'task (enghi-request "GET" (format "/api/tasks/%d"
+                                                              (alist-get 'id task)))))
+           (project (funcall find (alist-get 'project_id got))))
+      (should (equal (alist-get 'state got) "next"))
+      (should (equal (alist-get 'title got) "Ask for dates"))
+      (should (equal (alist-get 'title project) title))
+      (should-not (alist-get 'stalled project)))
+    ;; A project with no next action is stalled until one is added
+    (let* ((project (enghi-request "POST" "/api/projects"
+                                   `((title . ,(enghi-tests--unique "Stalled")))))
+           (id (alist-get 'id project)))
+      (should (alist-get 'stalled (funcall find id)))
+      (enghi-tests--answering '("First step")
+        (enghi--triage-project-add-next project))
+      (should (funcall find id))
+      (should-not (alist-get 'stalled (funcall find id)))
+      ;; Done, it leaves the list
+      (enghi--triage-project-done project)
+      (should-not (funcall find id)))))
 
 ;;;; Peeking at web screens
 

@@ -553,6 +553,14 @@ A name that is not an active project creates one (`enghi--create-project')."
                      (alist-get 'contexts (enghi-request "GET" "/api/contexts"))))
    (enghi--task-number task 'context_id) t))
 
+(defun enghi--read-context-field (task)
+  "Read a context for TASK when contexts are on, as the fields to send.
+Return nil when they are off, so the task's context is left alone."
+  (when (eq (alist-get 'contexts task) t)
+    (list (if-let* ((context (enghi--read-context task)))
+              `(context_id . ,(cdr context))
+            '(clear_context . t)))))
+
 (defun enghi--date-time (date)
   "Return DATE (YYYY-MM-DD) as a Lisp time, or nil if it is not one."
   (when (and date (string-match "\\`\\([0-9]\\{4\\}\\)-\\([0-9]\\{2\\}\\)-\\([0-9]\\{2\\}\\)\\'" date))
@@ -622,15 +630,11 @@ Return \"\" for no repeat."
 (defun enghi--task-next (task)
   "Move TASK to Next, asking for its project and context."
   (let* ((project (enghi--read-project task t))
-         (context (when (eq (alist-get 'contexts task) t)
-                    (list (enghi--read-context task)))))
+         (context (enghi--read-context-field task)))
     (enghi--patch-task
      task `((state . "next")
             ,(if project `(project_id . ,(cdr project)) '(clear_project . t))
-            ,@(when context
-                (list (if (car context)
-                          `(context_id . ,(cdar context))
-                        '(clear_context . t))))))
+            ,@context))
     (format "→ Next: %s%s" (enghi--task-title task)
             (if project (format " (%s)" (car project)) ""))))
 
